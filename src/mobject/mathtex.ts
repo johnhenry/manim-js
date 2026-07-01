@@ -47,28 +47,150 @@ let _mj: any = null;
 // convert warms the font cache).
 let _initPromise: Promise<any> | null = null;
 
+// True once we have fallen back to the browser CDN MathJax (window.MathJax).
+// In that mode `_mj` stays null (there is no liteAdaptor / lite-DOM), and the
+// glyph builder uses the browser DOM to walk the produced <svg> instead.
+let _cdnMathJax: any = null;
+
+function isNode(): boolean {
+  return typeof process !== "undefined" && !!(process as any).versions?.node
+    && typeof document === "undefined";
+}
+
 export function initMathTex(): Promise<any> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
-    const [{ mathjax }, { TeX }, { SVG }, { liteAdaptor }, { RegisterHTMLHandler }, { AllPackages }] =
-      await Promise.all([
-        import("mathjax-full/js/mathjax.js"),
-        import("mathjax-full/js/input/tex.js"),
-        import("mathjax-full/js/output/svg.js"),
-        import("mathjax-full/js/adaptors/liteAdaptor.js"),
-        import("mathjax-full/js/handlers/html.js"),
-        import("mathjax-full/js/input/tex/AllPackages.js"),
-      ]);
-    const adaptor = liteAdaptor();
-    RegisterHTMLHandler(adaptor);
-    const input = new TeX({ packages: AllPackages });
-    // fontCache "local" emits per-equation <defs><path> glyph definitions.
-    const output = new SVG({ fontCache: "local" });
-    const doc = mathjax.document("", { InputJax: input, OutputJax: output });
-    _mj = { adaptor, doc };
-    return _mj;
+    // --- Node path (primary): mathjax-full + liteAdaptor, unchanged. ---------
+    // Only attempt the bundler-style npm import when we're clearly in Node. In
+    // the browser this import needs a bundler and MathJax's global handler
+    // registration can be broken by code-splitting, so we prefer the CDN there.
+    if (isNode()) {
+      const [{ mathjax }, { TeX }, { SVG }, { liteAdaptor }, { RegisterHTMLHandler }, { AllPackages }] =
+        await Promise.all([
+          import("mathjax-full/js/mathjax.js"),
+          import("mathjax-full/js/input/tex.js"),
+          import("mathjax-full/js/output/svg.js"),
+          import("mathjax-full/js/adaptors/liteAdaptor.js"),
+          import("mathjax-full/js/handlers/html.js"),
+          import("mathjax-full/js/input/tex/AllPackages.js"),
+        ]);
+      const adaptor = liteAdaptor();
+      RegisterHTMLHandler(adaptor);
+      const input = new TeX({ packages: AllPackages });
+      // fontCache "local" emits per-equation <defs><path> glyph definitions.
+      const output = new SVG({ fontCache: "local" });
+      const doc = mathjax.document("", { InputJax: input, OutputJax: output });
+      _mj = { adaptor, doc };
+      return _mj;
+    }
+
+    // --- Browser path: try the bundled npm import first, then CDN. -----------
+    // If a bundler resolved mathjax-full, we can still use the liteAdaptor in
+    // the browser. But bundler code-splitting is a known footgun: MathJax
+    // registers its handler on a module-level singleton, and if that singleton
+    // is duplicated/reset by chunk boundaries, `RegisterHTMLHandler` silently
+    // fails to register and `mathjax.document(...)` throws "Handler ... not
+    // found". So after wiring it up we verify by producing a trivial SVG; if
+    // that fails, we discard it and fall back to the CDN <script> path.
+    try {
+      const [{ mathjax }, { TeX }, { SVG }, { liteAdaptor }, { RegisterHTMLHandler }, { AllPackages }] =
+        await Promise.all([
+          import("mathjax-full/js/mathjax.js"),
+          import("mathjax-full/js/input/tex.js"),
+          import("mathjax-full/js/output/svg.js"),
+          import("mathjax-full/js/adaptors/liteAdaptor.js"),
+          import("mathjax-full/js/handlers/html.js"),
+          import("mathjax-full/js/input/tex/AllPackages.js"),
+        ]);
+      const adaptor = liteAdaptor();
+      RegisterHTMLHandler(adaptor);
+      const input = new TeX({ packages: AllPackages });
+      const output = new SVG({ fontCache: "local" });
+      const doc = mathjax.document("", { InputJax: input, OutputJax: output });
+      // VERIFY the handler/singleton actually registered before trusting it.
+      const probe = doc.convert("x", { display: true });
+      if (!probe || !findSvg(adaptor, probe)) {
+        throw new Error("MathJax handler not registered (code-splitting)");
+      }
+      _mj = { adaptor, doc };
+      return _mj;
+    } catch {
+      // Fall through to the CDN loader below.
+    }
+
+    _cdnMathJax = await loadCdnMathJax();
+    return { cdn: _cdnMathJax };
   })();
   return _initPromise;
+}
+
+// Load MathJax v3 (tex-svg) from a CDN <script> tag and wait until its startup
+// document is ready. Returns the global `window.MathJax`. Used only in the
+// browser when mathjax-full can't be resolved or its handler registration is
+// broken by bundling.
+function loadCdnMathJax(
+  url = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js",
+): Promise<any> {
+  if (typeof document === "undefined") {
+    return Promise.reject(new Error("CDN MathJax requires a browser DOM (document is undefined)."));
+  }
+  const w = window as any;
+  if (w.MathJax?.startup?.document) return Promise.resolve(w.MathJax);
+
+  return new Promise((resolve, reject) => {
+    // Configure MathJax before the script evaluates (v3 reads window.MathJax).
+    if (!w.MathJax) {
+      w.MathJax = { startup: { typeset: false } };
+    }
+    const finish = () => {
+      const ready = w.MathJax?.startup?.promise ?? Promise.resolve();
+      ready.then(() => {
+        if (w.MathJax?.tex2svg || w.MathJax?.startup?.document) resolve(w.MathJax);
+        else reject(new Error("MathJax loaded but tex2svg/startup.document is unavailable."));
+      }).catch(reject);
+    };
+    // Reuse an existing tag if present.
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${url}"]`);
+    if (existing) {
+      if (w.MathJax?.startup?.document) resolve(w.MathJax);
+      else existing.addEventListener("load", finish, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = url;
+    script.async = true;
+    script.addEventListener("load", finish, { once: true });
+    script.addEventListener("error", () => reject(new Error("Failed to load MathJax from " + url)));
+    document.head.appendChild(script);
+  });
+}
+
+// Produce a raw MathJax SVG string for a tex expression. This is the shared
+// entry point used by the raster (mathtex_image) and dvisvgm backends. It works
+// in Node (liteAdaptor) and the browser (bundled liteAdaptor OR CDN tex2svg).
+// `await initMathTex()` must have resolved first.
+export async function texToSVG(tex: string, config: MathTexConfig = {}): Promise<string> {
+  await initMathTex();
+  const wrapped = String(wrapEnvironment(String(tex), config.texEnvironment));
+
+  // Node / bundled-liteAdaptor path.
+  if (_mj) {
+    const { adaptor, doc } = _mj;
+    const container = doc.convert(wrapped, { display: true });
+    const svgNode = findSvg(adaptor, container);
+    if (!svgNode) throw new Error("MathJax produced no <svg> for: " + tex);
+    return adaptor.outerHTML(svgNode);
+  }
+
+  // Browser CDN path: window.MathJax.tex2svg returns an mjx-container element.
+  if (_cdnMathJax) {
+    const container = _cdnMathJax.tex2svg(wrapped, { display: true });
+    const svgEl = container?.querySelector?.("svg") ?? container;
+    if (!svgEl) throw new Error("CDN MathJax produced no <svg> for: " + tex);
+    return svgEl.outerHTML as string;
+  }
+
+  throw new Error("MathTex: no MathJax backend available; call `await initMathTex()` first.");
 }
 
 // --- 2x3 affine transform helpers ------------------------------------------

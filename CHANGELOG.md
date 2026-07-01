@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0 — prior-art learnings
+
+Features informed by studying other manim/web ports (JazonJiao/Manim.js,
+maloyan/manim-web, the Dart manim-web, Motion Canvas, MathBox, ManimGL):
+
+- **Python→TypeScript scene converter** (`py2ts` / `bin/py2ts.ts`): transpiles the
+  common manim-scene subset to manim-js (imports, `Scene` subclass, `self.play`
+  → `await this.play`, kwargs → config objects, snake_case → camelCase).
+- **Signals reactivity** (`createSignal`/`computed`/`effect`/`reactive`/`bind`): a
+  lazy dependency-tracking alternative to updaters/`always_redraw`.
+- **Hardened browser MathJax loader**: npm → CDN fallback with handler-registration
+  verification (fixes bundler code-splitting breakage). Plus `texToSVG()`.
+- **Raster LaTeX** (`MathTexImage`/`mathTexImage`): render a MathJax equation to a
+  bitmap for dense/static equations (cheaper than glyph Béziers).
+- **Reliable `TransformMatchingTex`**: explicit key matching by tex-part + `keyMap`
+  override + `matchingParts()`.
+- **In-browser GIF/MP4 export** (`recordGif`/`recordMp4`/`recordVideo` via gifenc +
+  WebCodecs/mp4-muxer) alongside the existing WebM.
+- **GPU SDF strokes + lighting** in the Three.js backend (`strokeMode: 'sdf'`,
+  `lit: true`) — crisp anti-aliased strokes and real GPU-lit surfaces.
+- **Optional dvisvgm Node LaTeX backend** (`mathTexDvisvgm`): real TeX → SVG →
+  Béziers with a disk cache, graceful fallback to MathJax when TeX is absent.
+- **Live playground + scrubber** (`examples/playground/`, `Player`) and a
+  `Scene.onLog` observability hook.
+- Fix: `polygon-clipping` is now lazily imported so the unbundled browser bundle
+  loads (a Phase-4 regression).
+
 ## 1.0.0 — manim parity milestone
 
 A near-complete TypeScript port of ManimCommunity manim, delivered as a phased

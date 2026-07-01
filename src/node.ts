@@ -12,6 +12,7 @@ import { QUALITIES } from "./index.ts";
 import { config as manimConfig, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_config.ts";
 
 export * from "./index.ts";
+export { MathTexDvisvgm, mathTexDvisvgm, mathTexDvisvgmOrFallback, texToSVGViaDvisvgm, detectDvisvgmToolchain } from "./mobject/mathtex_dvisvgm.ts";
 export { config, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_config.ts";
 
 // Options accepted by render(). All fields are optional; sensible defaults are

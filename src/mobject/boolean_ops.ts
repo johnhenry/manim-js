@@ -7,9 +7,27 @@
 import { VMobject } from "./VMobject.ts";
 import type { VMobjectConfig } from "./VMobject.ts";
 import { flattenMobject } from "../renderer/geometry_util.ts";
-// polygon-clipping ships as a default export exposing
-// .union/.intersection/.difference/.xor. It's untyped here (any) which is fine.
-import polygonClipping from "polygon-clipping";
+
+// polygon-clipping is loaded via a caught top-level dynamic import so this module
+// (and thus the whole library) still LOADS in an unbundled browser where the bare
+// "polygon-clipping" specifier can't resolve without an import map. In Node it
+// resolves before any op is constructed, keeping the sync constructor API. In the
+// browser (no import map) it stays null and the boolean ops throw a clear error.
+let polygonClipping: any = null;
+try {
+  const _pc: any = await import("polygon-clipping");
+  polygonClipping = _pc.default ?? _pc;
+} catch { /* browser without an import map for polygon-clipping */ }
+
+function requirePC(): any {
+  if (!polygonClipping) {
+    throw new Error(
+      "Boolean ops require the 'polygon-clipping' package. In Node it loads " +
+      "automatically; in an unbundled browser add it to your import map (or use a bundler).",
+    );
+  }
+  return polygonClipping;
+}
 
 // A 2D ring is a list of [x, y] pairs; a polygon is a ring list (outer + holes);
 // a MultiPolygon is a list of polygons. These mirror polygon-clipping's shapes.
@@ -113,7 +131,7 @@ export class Union extends _BooleanOps {
     }
     const polys = vmobjects.map((v) => this._convertVmobjectToPolygon(v));
     const [first, ...rest] = polys;
-    const result = (polygonClipping as any).union(first, ...rest) as MultiPolygon2D;
+    const result = requirePC().union(first, ...rest) as MultiPolygon2D;
     this._applyResult(result);
     copyStyle(this, vmobjects[0]);
   }
@@ -128,7 +146,7 @@ export class Intersection extends _BooleanOps {
     }
     const polys = vmobjects.map((v) => this._convertVmobjectToPolygon(v));
     const [first, ...rest] = polys;
-    const result = (polygonClipping as any).intersection(first, ...rest) as MultiPolygon2D;
+    const result = requirePC().intersection(first, ...rest) as MultiPolygon2D;
     this._applyResult(result);
     copyStyle(this, vmobjects[0]);
   }
@@ -143,7 +161,7 @@ export class Difference extends _BooleanOps {
     }
     const subjectPoly = this._convertVmobjectToPolygon(subject);
     const clipPolys = clips.map((v) => this._convertVmobjectToPolygon(v));
-    const result = (polygonClipping as any).difference(subjectPoly, ...clipPolys) as MultiPolygon2D;
+    const result = requirePC().difference(subjectPoly, ...clipPolys) as MultiPolygon2D;
     this._applyResult(result);
     copyStyle(this, subject);
   }
@@ -158,7 +176,7 @@ export class Exclusion extends _BooleanOps {
     }
     const polys = vmobjects.map((v) => this._convertVmobjectToPolygon(v));
     const [first, ...rest] = polys;
-    const result = (polygonClipping as any).xor(first, ...rest) as MultiPolygon2D;
+    const result = requirePC().xor(first, ...rest) as MultiPolygon2D;
     this._applyResult(result);
     copyStyle(this, vmobjects[0]);
   }

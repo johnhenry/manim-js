@@ -50,7 +50,8 @@ export * from "./mobject/text/variable.ts";
 export { ChangingDecimal, ChangeDecimalToValue } from "./animation/numbers.ts";
 export { VText, setDefaultFont, setDefaultFontSync, getDefaultFont } from "./mobject/vectorized_text.ts";
 export { parsePathToSubpaths, subpathsToVMobject } from "./mobject/svg_path.ts";
-export { MathTex, Tex, SingleStringMathTex, texToVGroup, initMathTex } from "./mobject/mathtex.ts";
+export { MathTex, Tex, SingleStringMathTex, texToVGroup, initMathTex, texToSVG } from "./mobject/mathtex.ts";
+export { MathTexImage, mathTexImage } from "./mobject/mathtex_image.ts";
 export { ImageMobject } from "./mobject/image_mobject.ts";
 export { SVGMobject, parseXML, parseTransform } from "./mobject/svg_mobject.ts";
 export { ThreeDScene, ThreeDCamera, ThreeDAxes } from "./scene/three_d.ts";
@@ -99,7 +100,12 @@ export {
   ApplyMatrix, ApplyComplexFunction, ScaleInPlace, FadeTransform, FadeTransformPieces,
   CyclicReplace, Swap,
 } from "./animation/transform_extra.ts";
-export { TransformMatchingShapes, TransformMatchingTex } from "./animation/transform_matching.ts";
+export { TransformMatchingShapes, TransformMatchingTex, matchingParts } from "./animation/transform_matching.ts";
+
+// Learnings from prior-art (py2ts converter, signals reactivity, frame Player).
+export { convert as py2ts } from "./tools/py2ts.ts";
+export * from "./reactive/signal.ts";
+export { Player } from "./player.ts";
 export { Homotopy, SmoothedVectorizedHomotopy, ComplexHomotopy, PhaseFlow } from "./animation/movement.ts";
 export { ShowPassingFlash, ShowPassingFlashWithThinningStrokeWidth, ApplyWave, Blink } from "./animation/indication_extra.ts";
 export { AnimatedBoundary, TracedPath } from "./animation/changing.ts";

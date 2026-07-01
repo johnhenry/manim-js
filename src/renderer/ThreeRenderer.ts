@@ -9,14 +9,27 @@
 
 import * as V from "../core/math/vector.ts";
 import { collectBuffers } from "./geometry_util.ts";
+import { makeBezierStrokeMaterial, buildStrokeGeometry } from "./bezier_shader.ts";
 
 export interface ThreeRendererOptions {
   camera?: any;
   background?: string;
   canvas?: any;
   antialias?: boolean;
+  // Stroke rendering path. 'line' (default) = thin 1px THREE.LineSegments,
+  // matching the original behavior. 'sdf' = thick, anti-aliased screen-space
+  // signed-distance strokes via the bezier shader material.
+  strokeMode?: "line" | "sdf";
+  // Half/full pixel width for the SDF stroke path.
+  strokeWidth?: number;
+  // Enable GPU lighting for fill meshes (MeshStandardMaterial + normals + a
+  // directional/ambient light). Default false keeps baked-color MeshBasicMaterial.
+  lit?: boolean;
   [key: string]: any;
 }
+
+// Default scene light direction, matching the CPU shading normal.
+const LIGHT_DIR: [number, number, number] = V.normalize([-1, -1, 1]) as [number, number, number];
 
 export class ThreeRenderer {
   THREE: any;
@@ -26,11 +39,17 @@ export class ThreeRenderer {
   scene: any;
   group: any;
   threeCamera: any;
+  strokeMode: "line" | "sdf";
+  strokeWidth: number;
+  lit: boolean;
 
   constructor(THREE: any, opts: ThreeRendererOptions = {}) {
     this.THREE = THREE;
     this.camera = opts.camera;
     this.background = opts.background ?? "#000000";
+    this.strokeMode = opts.strokeMode ?? "line";
+    this.strokeWidth = opts.strokeWidth ?? 4;
+    this.lit = opts.lit ?? false;
 
     // Pass our 0..1 colors straight through (no linear/sRGB conversion) so the
     // WebGL output matches the CPU renderer.
@@ -44,7 +63,19 @@ export class ThreeRenderer {
     this.scene.background = new THREE.Color(this.background);
     this.group = new THREE.Group();
     this.scene.add(this.group);
+    if (this.lit) this._addLights();
     this.threeCamera = this._makeCamera();
+  }
+
+  // Add a directional + ambient light matching the CPU shading light direction,
+  // used when `lit` is enabled and fills render with MeshStandardMaterial.
+  _addLights(): void {
+    const { THREE } = this;
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    // Light points toward the origin from the LIGHT_DIR side.
+    dir.position.set(LIGHT_DIR[0], LIGHT_DIR[1], LIGHT_DIR[2]);
+    this.scene.add(dir);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.35));
   }
 
   is3D(): boolean {
@@ -96,7 +127,9 @@ export class ThreeRenderer {
 
     if (buf.opaque.positions.length) this.group.add(this._mesh(buf.opaque, false, 1));
     for (const b of buf.transparent) this.group.add(this._mesh(b, true, b.alpha));
-    if (buf.lines.positions.length) this.group.add(this._lines(buf.lines));
+    if (buf.lines.positions.length) {
+      this.group.add(this.strokeMode === "sdf" ? this._sdfStrokes(buf.lines) : this._lines(buf.lines));
+    }
     for (const t of buf.texts) { const s = this._textSprite(t); if (s) this.group.add(s); }
     for (const im of buf.images) { const p = this._imageQuad(im); if (p) this.group.add(p); }
 
@@ -109,11 +142,34 @@ export class ThreeRenderer {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(buf.positions, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(buf.colors, 3));
-    const m = new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide,
-      transparent, opacity: transparent ? alpha : 1, depthWrite: !transparent,
-    });
+    let m: any;
+    if (this.lit) {
+      // Real GPU lighting: compute normals from the triangle soup and shade with
+      // a physically-based standard material (vertex colors as albedo).
+      g.computeVertexNormals();
+      m = new THREE.MeshStandardMaterial({
+        vertexColors: true, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.0,
+        transparent, opacity: transparent ? alpha : 1, depthWrite: !transparent,
+      });
+    } else {
+      m = new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide,
+        transparent, opacity: transparent ? alpha : 1, depthWrite: !transparent,
+      });
+    }
     return new THREE.Mesh(g, m);
+  }
+
+  // Thick anti-aliased strokes via the screen-space SDF bezier material. Reuses
+  // the same flat segment data (positions/colors) as the default line path.
+  _sdfStrokes(buf: any): any {
+    const { THREE, camera } = this;
+    const geo = buildStrokeGeometry(THREE, buf.positions, null, buf.colors);
+    const mat = makeBezierStrokeMaterial(THREE, {
+      width: this.strokeWidth,
+      resolution: [camera.pixelWidth, camera.pixelHeight],
+    });
+    return new THREE.Mesh(geo, mat);
   }
 
   _lines(buf: any): any {

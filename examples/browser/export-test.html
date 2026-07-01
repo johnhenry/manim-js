@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>manim-js — GIF/MP4 export test</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "manim-js/browser": "/dist/browser.js",
+      "gifenc": "/node_modules/gifenc/dist/gifenc.esm.js",
+      "mp4-muxer": "/node_modules/mp4-muxer/build/mp4-muxer.mjs"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="stage" width="480" height="270"></canvas>
+  <pre id="out">running…</pre>
+  <script type="module">
+    import { recordGif, recordMp4, Scene, Circle, Square, Create, Transform, BLUE, GREEN } from "manim-js/browser";
+    const out = document.getElementById("out");
+    const log = (s) => { out.textContent += "\n" + s; };
+    class Demo extends Scene {
+      async construct() {
+        const c = new Circle({ radius: 1.2, color: BLUE, fillColor: BLUE, fillOpacity: 0.5 });
+        await this.play(new Create(c), { _playConfig: true, runTime: 0.4 });
+        await this.play(new Transform(c, new Square({ sideLength: 2, color: GREEN })), { _playConfig: true, runTime: 0.4 });
+      }
+    }
+    window.__result = { gif: null, mp4: null, error: null };
+    (async () => {
+      try {
+        const gif = await recordGif(Demo, { canvas: document.getElementById("stage"), fps: 12, quality: "low", background: "#0d1117" });
+        window.__result.gif = { type: gif.type, size: gif.size };
+        log("GIF: " + gif.type + " " + gif.size + " bytes");
+        try {
+          const mp4 = await recordMp4(Demo, { canvas: document.getElementById("stage"), fps: 12, quality: "low", background: "#0d1117" });
+          window.__result.mp4 = { type: mp4.type, size: mp4.size };
+          log("MP4: " + mp4.type + " " + mp4.size + " bytes");
+        } catch (e) { window.__result.mp4 = { error: e.message }; log("MP4 unsupported: " + e.message); }
+        window.__done = true;
+      } catch (e) { window.__result.error = e.message; window.__done = true; log("ERROR: " + e.message); }
+    })();
+  </script>
+</body>
+</html>

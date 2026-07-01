@@ -79,6 +79,15 @@ export class Scene {
    */
   onSegment?: (rec: { index: number; kind: string; hash: string; startFrame: number }) => { skip?: boolean } | undefined;
 
+  /**
+   * Optional observability hook. When set, the Scene emits lightweight,
+   * structured log events at interesting moments (play/wait start, section
+   * boundaries). DEFAULT-OFF: if unset, `log()` is a no-op and there is no
+   * behavior change. Useful for embedding the engine in a playground/UI or for
+   * tracing what a construct() is doing without touching stdout.
+   */
+  onLog?: (level: string, msg: string, data?: any) => void;
+
   constructor(config: SceneConfig = {}) {
     this.mobjects = [];
     this.fps = config.fps ?? 30;
@@ -91,6 +100,15 @@ export class Scene {
     this._sectionId = 0;
     this.playCount = 0;
     this.playRecords = [];
+  }
+
+  /**
+   * Emit a structured log event through the optional `onLog` hook. A no-op when
+   * `onLog` is unset (default), so this is safe to sprinkle through the engine
+   * without any behavior or performance cost in the common case.
+   */
+  log(level: string, msg: string, data?: any): void {
+    this.onLog?.(level, msg, data);
   }
 
   /**
@@ -112,6 +130,7 @@ export class Scene {
       endFrame: -1,
       id: this._sectionId++,
     });
+    this.log("section", `section: ${name}`, { name, type, skipAnimations, startFrame: this.frameCount });
     return this;
   }
 
@@ -231,6 +250,10 @@ export class Scene {
     const nFrames = Math.max(1, Math.round(totalTime * this.fps));
     const dt = totalTime / nFrames;
 
+    this.log("play", `play: ${anims.length} animation(s)`, {
+      index: playIndex, count: anims.length, runTime: totalTime, nFrames, startFrame,
+    });
+
     for (let f = 1; f <= nFrames; f++) {
       const elapsed = (f / nFrames) * totalTime;
       for (const a of anims) {
@@ -271,6 +294,8 @@ export class Scene {
     const hash = this.hashAnimations([{ constructor: { name: "Wait" }, runTime: duration, mobject: { points: [], submobjects: [] } }], `wait:${duration}:${fp}`);
     const directive = this.onSegment?.({ index: playIndex, kind: "wait", hash, startFrame });
     const skip = !!directive?.skip;
+
+    this.log("wait", `wait: ${duration}s`, { index: playIndex, duration, nFrames, startFrame });
 
     for (let f = 0; f < nFrames; f++) {
       this.updateMobjects(dt);

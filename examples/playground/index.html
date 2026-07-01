@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>manim-js — live playground</title>
+  <!--
+    HOW TO SERVE
+    ============
+    Browsers cannot strip TypeScript types, so this page imports the COMPILED
+    library from /dist. Build it once, then serve the repo root over HTTP:
+
+        npm run build            # emits dist/*.js  (includes dist/player.js)
+        python3 -m http.server   # serves the repo at http://localhost:8000
+
+    Then open:  http://localhost:8000/examples/playground/
+
+    (Opening the file:// URL directly will NOT work — ES module imports need a
+    web server.)
+  -->
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #0d1117; color: #c9d1d9;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      display: grid; grid-template-columns: 420px 1fr; gap: 1rem;
+      height: 100vh; padding: 1rem;
+    }
+    h1 { font-size: 1.1rem; margin: 0 0 .5rem; font-weight: 600; }
+    .left, .right { display: flex; flex-direction: column; gap: .6rem; min-height: 0; }
+    textarea {
+      flex: 1; min-height: 200px; width: 100%; resize: none;
+      background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; padding: .6rem; font-family: ui-monospace, monospace;
+      font-size: 12.5px; line-height: 1.45; tab-size: 2;
+    }
+    button {
+      background: #238636; color: #fff; border: 0; padding: .5rem 1rem;
+      border-radius: 6px; font-size: .95rem; cursor: pointer;
+    }
+    button.secondary { background: #30363d; }
+    button:disabled { opacity: .5; cursor: default; }
+    .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    canvas {
+      width: 100%; border-radius: 8px; background: #000;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5); aspect-ratio: 16 / 9;
+    }
+    input[type=range] { flex: 1; accent-color: #238636; }
+    #status { font-size: .8rem; color: #8b949e; min-height: 1.1em; }
+    #log {
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: .4rem .6rem; font-family: ui-monospace, monospace; font-size: 11.5px;
+      height: 150px; overflow: auto; white-space: pre-wrap; line-height: 1.4;
+    }
+    .log-play { color: #58a6ff; } .log-wait { color: #d29922; }
+    .log-section { color: #a371f7; } .log-record { color: #8b949e; }
+    .log-error { color: #f85149; }
+    .scrub-time { font-variant-numeric: tabular-nums; font-size: .8rem; color: #8b949e; min-width: 90px; text-align: right; }
+    label.small { font-size: .75rem; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <div class="left">
+    <h1>manim-js playground</h1>
+    <label class="small">construct(scene) — the whole library is in scope as <code>m</code></label>
+    <textarea id="code" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="run">▶ Run &amp; Record</button>
+      <label class="small">quality
+        <select id="quality" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px;">
+          <option value="low">low</option>
+          <option value="medium" selected>medium</option>
+          <option value="high">high</option>
+        </select>
+      </label>
+    </div>
+    <div id="status"></div>
+    <label class="small">scene.onLog stream</label>
+    <div id="log"></div>
+  </div>
+
+  <div class="right">
+    <canvas id="stage" width="1280" height="720"></canvas>
+    <div class="row">
+      <button id="playpause" class="secondary" disabled>▶ Play</button>
+      <input id="scrubber" type="range" min="0" max="0" value="0" step="1" disabled />
+      <span id="time" class="scrub-time">0.00 / 0.00 s</span>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import the compiled library + the recording Player from /dist.
+    import * as m from "/dist/index.js";
+    import { Player } from "/dist/player.js";
+
+    const $ = (id) => document.getElementById(id);
+    const codeEl = $("code");
+    const logEl = $("log");
+    const statusEl = $("status");
+    const scrubber = $("scrubber");
+    const timeEl = $("time");
+    const playpause = $("playpause");
+    const canvas = $("stage");
+
+    // Prefilled example: uses globals from the manim-js module (in scope as `m`).
+    // `scene` is the live Scene — call scene.play / scene.wait / scene.add etc.
+    codeEl.value = `// 'scene' is the manim-js Scene; 'm' is the whole library.
+const { Circle, Square, Text, Create, Write, Transform, FadeOut, BLUE, YELLOW, RED } = m;
+
+scene.nextSection("intro");
+const title = new Text("manim-js", { fontSize: 1, color: YELLOW, point: [0, 2.5, 0] });
+await scene.play(new Write(title));
+
+scene.nextSection("shapes");
+const sq = new Square({ sideLength: 2.2, color: BLUE, fillColor: BLUE, fillOpacity: 0.4 });
+await scene.play(new Create(sq));
+await scene.play(new Transform(sq, new Circle({ radius: 1.2, color: RED, fillColor: RED, fillOpacity: 0.4 })));
+await scene.wait(0.4);
+await scene.play(new FadeOut(sq), new FadeOut(title));
+`;
+
+    function log(level, msg) {
+      const line = document.createElement("div");
+      line.className = "log-" + level;
+      line.textContent = `[${level}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // A single Player, reused across runs (rewire its display canvas each time).
+    let player = null;
+
+    function syncScrubber(frameIndex, time) {
+      scrubber.value = String(frameIndex);
+      const total = player ? player.duration : 0;
+      timeEl.textContent = `${time.toFixed(2)} / ${total.toFixed(2)} s`;
+    }
+
+    async function run() {
+      logEl.textContent = "";
+      statusEl.textContent = "Recording…";
+      $("run").disabled = true;
+      playpause.disabled = true;
+      scrubber.disabled = true;
+
+      try {
+        // Build a construct function from the user's code.
+        const userFn = new Function(
+          "scene", "m",
+          `return (async () => { ${codeEl.value}\n })();`,
+        );
+
+        player = new Player({ canvas, quality: $("quality").value, background: "#0d1117" });
+        player.onFrame = syncScrubber;
+
+        // Record. Wiring scene.onLog happens via a construct wrapper so we can
+        // attach the hook to the Player's Scene before frames flow.
+        await player.record(async (scene) => {
+          scene.onLog = (level, msg, data) =>
+            log(level, msg + (data && data.runTime != null ? ` (runTime=${data.runTime})` : ""));
+          await userFn(scene, m);
+        });
+
+        // Wire the scrubber to the recorded frames.
+        scrubber.max = String(Math.max(0, player.frameCount - 1));
+        scrubber.value = "0";
+        scrubber.disabled = false;
+        playpause.disabled = false;
+        player.seek(0);
+        statusEl.textContent = `Recorded ${player.frameCount} frames · ${player.duration.toFixed(2)}s @ ${player.fps}fps`;
+      } catch (err) {
+        log("error", String(err && err.stack ? err.stack : err));
+        statusEl.textContent = "Error — see log.";
+      } finally {
+        $("run").disabled = false;
+      }
+    }
+
+    // Scrub: seek on input, pausing any live playback first.
+    scrubber.addEventListener("input", () => {
+      if (!player) return;
+      if (player.playing) { player.pause(); playpause.textContent = "▶ Play"; }
+      player.seek(Number(scrubber.value));
+    });
+
+    // Play / pause toggles real-time playback; the Player's onFrame updates the slider.
+    playpause.addEventListener("click", () => {
+      if (!player) return;
+      if (player.playing) {
+        player.pause();
+        playpause.textContent = "▶ Play";
+      } else {
+        player.play();
+        playpause.textContent = "⏸ Pause";
+        // Reset the label when playback ends on its own.
+        const watch = setInterval(() => {
+          if (!player.playing) { playpause.textContent = "▶ Play"; clearInterval(watch); }
+        }, 100);
+      }
+    });
+
+    $("run").addEventListener("click", run);
+    run();
+  </script>
+</body>
+</html>
