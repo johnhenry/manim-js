@@ -42,6 +42,14 @@ import * as threeDMod from "../scene/three_d.ts";
 import * as animationMod from "../animation/Animation.ts";
 import * as extra from "../animation/extra.ts";
 import * as composition from "../animation/composition.ts";
+import * as creationExtra from "../animation/creation_extra.ts";
+import * as transformExtra from "../animation/transform_extra.ts";
+import * as transformMatching from "../animation/transform_matching.ts";
+import * as movementAnim from "../animation/movement.ts";
+import * as indicationExtra from "../animation/indication_extra.ts";
+import * as changingAnim from "../animation/changing.ts";
+import * as specializedAnim from "../animation/specialized.ts";
+import * as complexVT from "../mobject/complex_value_tracker.ts";
 import { RATE_FUNCTIONS } from "../animation/rate_functions.ts";
 import * as colorMod from "../core/color.ts";
 
@@ -56,7 +64,7 @@ export function registerBuiltins(): typeof registry {
 
   const mobjectModules = [geometry, tips, arcs, polygram, shapeMatchers, vectors,
     labeled, booleanOps, matrix, table, brace, graph, surface, polyhedra, coords, functionsMod, probabilityMod, vectorFieldMod,
-    valueTracker, textMod, paragraphMod, texExtrasMod, codeMod, variableMod, vtextMod, mathtexMod, svgMod, imageMod, threeDMod];
+    complexVT, valueTracker, textMod, paragraphMod, texExtrasMod, codeMod, variableMod, vtextMod, mathtexMod, svgMod, imageMod, threeDMod];
   for (const mod of mobjectModules) {
     for (const [name, value] of Object.entries(mod)) {
       if (isSubclassOf(value, Mobject)) registry.registerMobject(name, value);
@@ -64,7 +72,8 @@ export function registerBuiltins(): typeof registry {
     }
   }
 
-  const animationModules = [animationMod, extra, composition, numbersAnim];
+  const animationModules = [animationMod, extra, composition, numbersAnim, creationExtra,
+    transformExtra, transformMatching, movementAnim, indicationExtra, changingAnim, specializedAnim];
   for (const mod of animationModules) {
     for (const [name, value] of Object.entries(mod)) {
       if (isSubclassOf(value, Animation)) registry.registerAnimation(name, value);

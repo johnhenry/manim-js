@@ -74,6 +74,23 @@ export {
   GrowFromPoint, GrowFromCenter, GrowFromEdge, SpinInFromNothing, ShrinkToCenter,
   Rotating, Rotate, MoveAlongPath, Indicate, Flash, Wiggle, Circumscribe, FocusOn,
 } from "./animation/extra.ts";
+export {
+  DrawBorderThenFill, Unwrite, ShowIncreasingSubsets, ShowSubmobjectsOneByOne,
+  AddTextLetterByLetter, RemoveTextLetterByLetter, AddTextWordByWord,
+  TypeWithCursor, Untype, UntypeWithCursor, SpiralIn,
+} from "./animation/creation_extra.ts";
+export {
+  TransformFromCopy, ClockwiseTransform, CounterclockwiseTransform, MoveToTarget,
+  Restore, ApplyFunction, ApplyPointwiseFunction, ApplyPointwiseFunctionToCenter,
+  ApplyMatrix, ApplyComplexFunction, ScaleInPlace, FadeTransform, FadeTransformPieces,
+  CyclicReplace, Swap,
+} from "./animation/transform_extra.ts";
+export { TransformMatchingShapes, TransformMatchingTex } from "./animation/transform_matching.ts";
+export { Homotopy, SmoothedVectorizedHomotopy, ComplexHomotopy, PhaseFlow } from "./animation/movement.ts";
+export { ShowPassingFlash, ShowPassingFlashWithThinningStrokeWidth, ApplyWave, Blink } from "./animation/indication_extra.ts";
+export { AnimatedBoundary, TracedPath } from "./animation/changing.ts";
+export { Broadcast, ChangeSpeed } from "./animation/specialized.ts";
+export { ComplexValueTracker } from "./mobject/complex_value_tracker.ts";
 export * as rate_functions from "./animation/rate_functions.ts";
 
 // Plugin system: register the built-ins, then expose use()/registry.
