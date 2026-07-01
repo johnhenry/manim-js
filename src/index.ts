@@ -48,7 +48,11 @@ export { ThreeDScene, ThreeDCamera, ThreeDAxes } from "./scene/three_d.ts";
 export {
   Surface, ParametricSurface, Sphere, Torus, Cylinder, Cone, Box, Cube,
 } from "./mobject/surface.ts";
-export { NumberLine, Axes, NumberPlane } from "./mobject/coordinate_systems.ts";
+export { NumberLine, Axes, NumberPlane, PolarPlane, ComplexPlane, UnitInterval } from "./mobject/coordinate_systems.ts";
+export * from "./mobject/functions.ts";
+export * from "./mobject/probability.ts";
+export * from "./mobject/vector_field.ts";
+export * from "./mobject/graphing_scale.ts";
 export { ValueTracker, DecimalNumber, Integer, alwaysRedraw } from "./mobject/value_tracker.ts";
 
 export { CanvasRenderer, Camera } from "./renderer/CanvasRenderer.ts";

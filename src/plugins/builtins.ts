@@ -21,6 +21,9 @@ import * as matrix from "../mobject/matrix.ts";
 import * as table from "../mobject/table.ts";
 import * as brace from "../mobject/brace.ts";
 import * as graph from "../mobject/graph.ts";
+import * as functionsMod from "../mobject/functions.ts";
+import * as probabilityMod from "../mobject/probability.ts";
+import * as vectorFieldMod from "../mobject/vector_field.ts";
 import * as surface from "../mobject/surface.ts";
 import * as coords from "../mobject/coordinate_systems.ts";
 import * as valueTracker from "../mobject/value_tracker.ts";
@@ -51,7 +54,7 @@ export function registerBuiltins(): typeof registry {
   done = true;
 
   const mobjectModules = [geometry, tips, arcs, polygram, shapeMatchers, vectors,
-    labeled, booleanOps, matrix, table, brace, graph, surface, coords,
+    labeled, booleanOps, matrix, table, brace, graph, surface, coords, functionsMod, probabilityMod, vectorFieldMod,
     valueTracker, textMod, paragraphMod, texExtrasMod, codeMod, variableMod, vtextMod, mathtexMod, svgMod, imageMod, threeDMod];
   for (const mod of mobjectModules) {
     for (const [name, value] of Object.entries(mod)) {
