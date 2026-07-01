@@ -122,18 +122,69 @@ export class CanvasRenderer {
     this._zb.clear(bg[0], bg[1], bg[2]);
 
     // Collect the drawable family; text and images are deferred to an overlay.
+    // Fixed-in-frame / fixed-orientation mobjects are drawn last, in screen
+    // space, so HUD/titles stay put while the camera orbits.
     const overlay: any[] = [];
-    const draw = (m: any) => {
+    const fixed: any[] = [];
+    const draw = (m: any, fixedInFrame: boolean, fixedOrient: boolean) => {
+      const fif = fixedInFrame || !!m._fixedInFrame;
+      const fo = fixedOrient || !!m._fixedOrientation;
       if (m.points && m.points.length) {
-        if (m._isText || m._isImage) overlay.push(m);
+        if (fif || fo) fixed.push({ mob: m, fixedInFrame: fif, fixedOrient: fo });
+        else if (m._isText || m._isImage) overlay.push(m);
         else this._rasterMobject(m);
       }
-      for (const s of m.submobjects) draw(s);
+      for (const s of m.submobjects) draw(s, fif, fo);
     };
-    for (const m of mobjects) draw(m);
+    for (const m of mobjects) draw(m, false, false);
 
     this._zb.blitTo(ctx);
     for (const m of overlay) m._isImage ? this.drawImage(m) : this.drawText(m);
+    for (const { mob, fixedInFrame } of fixed) this._drawFixed(mob, fixedInFrame);
+  }
+
+  // Draw a mobject that ignores (fixed-in-frame) or partially ignores
+  // (fixed-orientation / billboard) the 3D camera projection. Fixed-in-frame:
+  // interpret coords in frame space via the base 2D Camera mapping. Fixed-
+  // orientation: project the CENTER through the 3D camera, then draw the mobject
+  // un-rotated around that screen anchor.
+  _drawFixed(mob: any, fixedInFrame: boolean): void {
+    const { ctx, camera } = this;
+    // Base 2D frame->pixel mapping (no 3D rotation / perspective).
+    const flat = (p: number[]): [number, number] => {
+      const cx = p[0] - camera.frameCenter[0];
+      const cy = p[1] - camera.frameCenter[1];
+      return [
+        (cx / camera.frameWidth + 0.5) * camera.pixelWidth,
+        (0.5 - cy / camera.frameHeight) * camera.pixelHeight,
+      ];
+    };
+
+    // Compute the screen anchor + a translation offset so a temporary override
+    // of camera.toPixel draws the mobject in the right place.
+    let offX = 0, offY = 0;
+    if (!fixedInFrame) {
+      // Fixed-orientation: anchor at the 3D-projected center, but draw the shape
+      // flat (un-rotated) around it.
+      const center = mob.getCenter ? mob.getCenter() : [0, 0, 0];
+      const [sx, sy] = camera.toPixel(center);
+      const [fx, fy] = flat(center);
+      offX = sx - fx;
+      offY = sy - fy;
+    }
+
+    const savedToPixel = camera.toPixel;
+    (camera as any).toPixel = (p: number[]): [number, number] => {
+      const [x, y] = flat(p);
+      return [x + offX, y + offY];
+    };
+    try {
+      if (mob._isText) this.drawText(mob);
+      else if (mob._isImage) this.drawImage(mob);
+      else this.drawVMobject(mob);
+    } finally {
+      (camera as any).toPixel = savedToPixel;
+    }
   }
 
   _projectVertex(p: number[]): { x: number; y: number; z: number; r?: number; g?: number; b?: number } {

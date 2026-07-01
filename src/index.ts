@@ -47,7 +47,11 @@ export { SVGMobject, parseXML, parseTransform } from "./mobject/svg_mobject.ts";
 export { ThreeDScene, ThreeDCamera, ThreeDAxes } from "./scene/three_d.ts";
 export {
   Surface, ParametricSurface, Sphere, Torus, Cylinder, Cone, Box, Cube,
+  Prism, Dot3D, Line3D, Arrow3D, ThreeDVMobject,
 } from "./mobject/surface.ts";
+export {
+  Polyhedron, Tetrahedron, Octahedron, Icosahedron, Dodecahedron, ConvexHull3D,
+} from "./mobject/polyhedra.ts";
 export { NumberLine, Axes, NumberPlane, PolarPlane, ComplexPlane, UnitInterval } from "./mobject/coordinate_systems.ts";
 export * from "./mobject/functions.ts";
 export * from "./mobject/probability.ts";

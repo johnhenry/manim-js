@@ -66,8 +66,14 @@ export class ThreeRenderer {
     const { camera, threeCamera } = this;
     const center = camera.frameCenter ?? [0, 0, 0];
     if (this.is3D()) {
-      // Inverse of ThreeDCamera.toCameraSpace: rotate camera-space basis into world.
-      const rot = (v: number[]) => V.rotateVector(V.rotateVector(v, camera.phi, [1, 0, 0]), camera.theta + 90 * V.DEGREES, [0, 0, 1]);
+      // Inverse of ThreeDCamera.toCameraSpace: rotate camera-space basis into
+      // world. gamma (roll) is applied first about the view axis (camera-space z),
+      // then the phi/theta rotations, matching toCameraSpace's inverse order.
+      const gamma = camera.gamma ?? 0;
+      const rot = (v: number[]) => V.rotateVector(
+        V.rotateVector(V.rotateVector(v, gamma, [0, 0, 1]), camera.phi, [1, 0, 0]),
+        camera.theta + 90 * V.DEGREES, [0, 0, 1],
+      );
       const eye = V.add(center, rot([0, 0, camera.focalDistance]));
       const up = rot([0, 1, 0]);
       threeCamera.position.set(eye[0], eye[1], eye[2]);

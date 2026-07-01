@@ -13,8 +13,19 @@ const DEFAULT_LIGHT = V.normalize([-1, -1, 1]); // upper-left, toward viewer
 const AMBIENT = 0.35;
 const DIFFUSE = 0.65;
 
+// Marker base for VMobjects that should be Lambertian-shaded and depth-sorted by
+// the 3D renderer (manim's ThreeDVMobject sets shade_in_3d = True).
+export class ThreeDVMobject extends VMobject {
+  shadeIn3d = true;
+
+  constructor(config: VMobjectConfig = {}) {
+    super(config);
+    this.shadeIn3d = true;
+  }
+}
+
 // A single quad face carrying its unshaded base color.
-class Face extends VMobject {
+class Face extends ThreeDVMobject {
   baseColor: Color;
   _uv?: number[][];
   _vertexColors?: number[][];
@@ -188,6 +199,79 @@ export class Surface extends VGroup {
     this.fillOpacity = o;
     return this;
   }
+
+  // Recolor each face by the value of a chosen coordinate (manim's
+  // Surface.set_fill_by_value). `colorscale` is a list of colors, or a list of
+  // [color, pivotValue] pairs. When pivots are omitted they are spread evenly
+  // across the surface's extent along `axis`. `axes` (optional, ThreeDAxes-like)
+  // maps a point to data coordinates via point_to_coords/pointToCoords; when
+  // absent the raw coordinate is used. Re-runs shading afterward.
+  setFillByValue(opts: {
+    axes?: any;
+    colorscale?: Array<ColorLike | [ColorLike, number]> | null;
+    axis?: number;
+  } = {}): this {
+    const axis = opts.axis ?? 2;
+    const scale = opts.colorscale;
+    if (!scale || scale.length === 0) return this;
+
+    const toCoord = (p: number[]): number => {
+      const axes = opts.axes;
+      if (axes && typeof axes.pointToCoords === "function") return axes.pointToCoords(p)[axis];
+      if (axes && typeof axes.point_to_coords === "function") return axes.point_to_coords(p)[axis];
+      return p[axis];
+    };
+
+    // Split into [colors, pivots]. Fill missing pivots evenly across the range.
+    const hasPivots = Array.isArray(scale[0]) && scale[0].length === 2 &&
+      typeof (scale[0] as any[])[1] === "number";
+    const colors: Color[] = [];
+    let pivots: number[] = [];
+    if (hasPivots) {
+      for (const entry of scale as [ColorLike, number][]) {
+        colors.push(Color.parse(entry[0]));
+        pivots.push(entry[1]);
+      }
+    } else {
+      for (const c of scale as ColorLike[]) colors.push(Color.parse(c));
+      // Even pivots across the min/max of the chosen coordinate.
+      let lo = Infinity, hi = -Infinity;
+      for (const f of this.submobjects as Face[]) {
+        const val = toCoord(f.getMidpoint());
+        if (val < lo) lo = val;
+        if (val > hi) hi = val;
+      }
+      if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+      const n = colors.length;
+      pivots = colors.map((_, i) => (n === 1 ? lo : lo + (hi - lo) * (i / (n - 1))));
+    }
+
+    const interp = (value: number): Color => {
+      if (value <= pivots[0]) return colors[0];
+      if (value >= pivots[pivots.length - 1]) return colors[colors.length - 1];
+      for (let i = 0; i < pivots.length - 1; i++) {
+        if (value >= pivots[i] && value <= pivots[i + 1]) {
+          const span = pivots[i + 1] - pivots[i];
+          const t = span === 0 ? 0 : (value - pivots[i]) / span;
+          return Color.lerp(colors[i], colors[i + 1], t);
+        }
+      }
+      return colors[colors.length - 1];
+    };
+
+    for (const f of this.submobjects as Face[]) {
+      const val = toCoord(f.getMidpoint());
+      const c = interp(val);
+      f.baseColor = c;
+      f.fillColor = c;
+    }
+    // Re-apply lighting on the new base colors.
+    if (this.shade) {
+      this.applyShading(this.lightDirection);
+      if (this.smooth) this.applySmoothShading(this.lightDirection);
+    }
+    return this;
+  }
 }
 
 export const ParametricSurface = Surface;
@@ -232,8 +316,29 @@ export class Torus extends Surface {
   }
 }
 
+// Build a filled disc (a polygon cap) at height z, radius r, in the xy-plane.
+// Used for Cylinder/Cone caps. Returned as a single ThreeDVMobject face.
+function discFace(r: number, z: number, color: ColorLike, segments: number, faceCfg: VMobjectConfig): Face {
+  const corners: number[][] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (2 * Math.PI * i) / segments;
+    corners.push([r * Math.cos(a), r * Math.sin(a), z]);
+  }
+  return new Face(corners, color, faceCfg);
+}
+
+export interface CylinderConfig extends SurfaceConfig {
+  showEnds?: boolean;
+  direction?: number[];
+}
+
 export class Cylinder extends Surface {
-  constructor(config: SurfaceConfig = {}) {
+  radius: number;
+  cylHeight: number;
+  showEnds: boolean;
+  axisDirection: number[];
+
+  constructor(config: CylinderConfig = {}) {
     const r = config.radius ?? 1;
     const h = config.height ?? 2;
     const func: SurfaceFunc = (u, v) => [r * Math.cos(u), r * Math.sin(u), v];
@@ -244,14 +349,69 @@ export class Cylinder extends Surface {
       fillColor: config.fillColor ?? config.color ?? "#83C167",
       ...config,
     });
+    this.radius = r;
+    this.cylHeight = h;
+    this.showEnds = config.showEnds ?? true;
+    this.axisDirection = V.OUT;
+
+    if (this.showEnds) this.addBases();
+    const dir = config.direction ?? V.OUT;
+    if (!V.equals(V.normalize(dir), V.OUT)) this.setDirection(dir);
+    else if (config.point) this.moveTo(config.point);
+  }
+
+  // Two disc caps at the top (+h/2) and bottom (-h/2) of the lateral surface.
+  addBases(): this {
+    const capColor = this.baseFill;
+    const segments = this.resolution[0];
+    const faceCfg: VMobjectConfig = { ...this._faceConfig };
+    const top = discFace(this.radius, this.cylHeight / 2, capColor, segments, faceCfg);
+    const bottom = discFace(this.radius, -this.cylHeight / 2, capColor, segments, faceCfg);
+    this.add(top, bottom);
+    if (this.shade) {
+      this.applyShading(this.lightDirection);
+      if (this.smooth) this.applySmoothShading(this.lightDirection);
+    }
+    return this;
+  }
+
+  // Orient the cylinder's axis along `direction` (rotating from +Z).
+  setDirection(direction: number[]): this {
+    const center = this.getCenter();
+    this.axisDirection = V.normalize(direction);
+    this.applyToPoints((p) =>
+      V.add(center, V.matrixVectorProduct(V.zToVector(direction), V.sub(p, center))));
+    return this;
+  }
+
+  getCylinderDirection(): number[] { return this.axisDirection; }
+  get3dDirection(): number[] { return this.axisDirection; }
+  getDirection3d(): number[] { return this.axisDirection; }
+
+  // Centers of the two ends, along the axis.
+  getStart(): number[] {
+    return V.add(this.getCenter(), V.scale(this.axisDirection, this.cylHeight / 2));
+  }
+  getEnd(): number[] {
+    return V.add(this.getCenter(), V.scale(this.axisDirection, -this.cylHeight / 2));
   }
 }
 
+export interface ConeConfig extends SurfaceConfig {
+  showBase?: boolean;
+  direction?: number[];
+}
+
 export class Cone extends Surface {
-  constructor(config: SurfaceConfig = {}) {
+  baseR: number;
+  coneHeight: number;
+  showBase: boolean;
+  axisDirection: number[];
+
+  constructor(config: ConeConfig = {}) {
     const r = config.baseRadius ?? 1;
     const h = config.height ?? 1; // manim Cone default height = 1
-    // v in [0,1] from apex (z=h) to base (z=0).
+    // v in [0,1] from apex (z=h) to base (z=0), so the apex is along +Z.
     const func: SurfaceFunc = (u, v) => [r * v * Math.cos(u), r * v * Math.sin(u), h * (1 - v)];
     super(func, {
       uRange: [0, 2 * Math.PI],
@@ -260,16 +420,187 @@ export class Cone extends Surface {
       fillColor: config.fillColor ?? config.color ?? "#FF862F",
       ...config,
     });
+    this.baseR = r;
+    this.coneHeight = h;
+    this.showBase = config.showBase ?? false;
+    this.axisDirection = V.OUT;
+
+    if (this.showBase) this.addBase();
+    // manim: apex points along `direction`, default -Z.
+    const dir = config.direction ?? V.IN;
+    if (!V.equals(V.normalize(dir), V.OUT)) this.setDirection(dir);
+    else if (config.point) this.moveTo(config.point);
   }
+
+  // A disc cap at the base (z=0, before orientation).
+  addBase(): this {
+    const faceCfg: VMobjectConfig = { ...this._faceConfig };
+    const base = discFace(this.baseR, 0, this.baseFill, this.resolution[0], faceCfg);
+    this.add(base);
+    if (this.shade) {
+      this.applyShading(this.lightDirection);
+      if (this.smooth) this.applySmoothShading(this.lightDirection);
+    }
+    return this;
+  }
+
+  // Orient the cone so its apex points along `direction` (rotating from +Z).
+  setDirection(direction: number[]): this {
+    const center = this.getCenter();
+    this.axisDirection = V.normalize(direction);
+    this.applyToPoints((p) =>
+      V.add(center, V.matrixVectorProduct(V.zToVector(direction), V.sub(p, center))));
+    return this;
+  }
+
+  get3dDirection(): number[] { return this.axisDirection; }
+  getConeDirection(): number[] { return this.axisDirection; }
+  getDirection3d(): number[] { return this.axisDirection; }
+
+  // Apex (tip) and base center. The local apex is at z=h, base at z=0; after
+  // orientation the apex lies along axisDirection from the geometric center.
+  getStart(): number[] {
+    return V.add(this.getCenter(), V.scale(this.axisDirection, this.coneHeight / 2));
+  }
+  getEnd(): number[] {
+    return V.add(this.getCenter(), V.scale(this.axisDirection, -this.coneHeight / 2));
+  }
+}
+
+// A small sphere centered at a point (manim's Dot3D).
+export interface Dot3DConfig extends SurfaceConfig {
+  point?: number[];
+  radius?: number;
+  resolution?: number | [number, number];
+}
+
+export class Dot3D extends Sphere {
+  constructor(config: Dot3DConfig = {}) {
+    const point = config.point ?? V.ORIGIN;
+    super({
+      radius: config.radius ?? 0.08,
+      resolution: config.resolution ?? [8, 8],
+      fillColor: config.fillColor ?? config.color ?? "#FFFFFF",
+      color: config.color ?? "#FFFFFF",
+      ...config,
+    });
+    this.moveTo(point);
+  }
+}
+
+// A thin cylinder from `start` to `end` (manim's Line3D).
+export interface Line3DConfig extends SurfaceConfig {
+  thickness?: number;
+  resolution?: number | [number, number];
+}
+
+export class Line3D extends Cylinder {
+  lineStart: number[];
+  lineEnd: number[];
+
+  constructor(start: number[] = V.LEFT, end: number[] = V.RIGHT, config: Line3DConfig = {}) {
+    const thickness = config.thickness ?? 0.02;
+    const length = V.distance(start, end);
+    const res = config.resolution ?? 24;
+    super({
+      radius: thickness / 2,
+      height: length,
+      resolution: Array.isArray(res) ? res : [res, res],
+      fillColor: config.fillColor ?? config.color ?? "#FFFFFF",
+      color: config.color ?? "#FFFFFF",
+      showEnds: config.showEnds ?? false,
+      ...config,
+      // Orientation handled below, not via Cylinder's direction path.
+      direction: V.OUT,
+    });
+    this.lineStart = V.clone(start);
+    this.lineEnd = V.clone(end);
+    // Orient the +Z cylinder along (end - start), then move to the midpoint.
+    const axis = length < 1e-9 ? V.OUT : V.normalize(V.sub(end, start));
+    if (!V.equals(axis, V.OUT)) this.setDirection(axis);
+    else this.axisDirection = V.OUT;
+    this.moveTo(V.midpoint(start, end));
+  }
+
+  getStart(): number[] { return V.clone(this.lineStart); }
+  getEnd(): number[] { return V.clone(this.lineEnd); }
+
+  // A line parallel to `line`, centered at `point`, of the given length.
+  static parallelTo(line: Line3D, point: number[] = V.ORIGIN, length = 5, config: Line3DConfig = {}): Line3D {
+    const dir = V.normalize(V.sub(line.getEnd(), line.getStart()));
+    const half = V.scale(dir, length / 2);
+    return new Line3D(V.sub(point, half), V.add(point, half), config);
+  }
+
+  // A line perpendicular to `line`, centered at `point`, of the given length.
+  static perpendicularTo(line: Line3D, point: number[] = V.ORIGIN, length = 5, config: Line3DConfig = {}): Line3D {
+    const dir = V.normalize(V.sub(line.getEnd(), line.getStart()));
+    // Any vector perpendicular to `dir`: cross with a non-parallel reference.
+    let perp = V.cross(dir, V.OUT);
+    if (V.length(perp) < 1e-9) perp = V.cross(dir, V.RIGHT);
+    perp = V.normalize(perp);
+    const half = V.scale(perp, length / 2);
+    return new Line3D(V.sub(point, half), V.add(point, half), config);
+  }
+}
+
+// A Line3D shaft with a Cone tip at the end (manim's Arrow3D).
+export interface Arrow3DConfig extends SurfaceConfig {
+  thickness?: number;
+  height?: number;
+  baseRadius?: number;
+}
+
+export class Arrow3D extends VGroup {
+  arrowStart: number[];
+  arrowEnd: number[];
+  shaft: Line3D;
+  tip: Cone;
+
+  constructor(start: number[] = V.LEFT, end: number[] = V.RIGHT, config: Arrow3DConfig = {}) {
+    super();
+    const thickness = config.thickness ?? 0.02;
+    const tipHeight = config.height ?? 0.3;
+    const baseRadius = config.baseRadius ?? 0.08;
+    const color = config.fillColor ?? config.color ?? "#FFFFFF";
+    this.arrowStart = V.clone(start);
+    this.arrowEnd = V.clone(end);
+
+    const axis = V.distance(start, end) < 1e-9 ? V.RIGHT : V.normalize(V.sub(end, start));
+    // Shorten the shaft so the cone tip ends exactly at `end`.
+    const shaftEnd = V.sub(end, V.scale(axis, tipHeight));
+
+    this.shaft = new Line3D(start, shaftEnd, { thickness, color, fillColor: color });
+    // Cone apex points along the arrow direction; place base center at shaftEnd.
+    this.tip = new Cone({
+      baseRadius,
+      height: tipHeight,
+      direction: axis,
+      showBase: true,
+      color,
+      fillColor: color,
+    });
+    // Cone's center sits between apex and base; move so apex reaches `end`.
+    this.tip.moveTo(V.midpoint(shaftEnd, end));
+    this.add(this.shaft, this.tip);
+  }
+
+  getStart(): number[] { return V.clone(this.arrowStart); }
+  getEnd(): number[] { return V.clone(this.arrowEnd); }
+}
+
+export interface BoxConfig extends SurfaceConfig {
+  dimensions?: [number, number, number];
 }
 
 // Axis-aligned box built from 6 flat quad faces (each shaded by its normal).
 export class Box extends VGroup {
-  constructor(config: SurfaceConfig = {}) {
+  constructor(config: BoxConfig = {}) {
     super();
-    const w = (config.width ?? 2) / 2;
-    const h = (config.height ?? 2) / 2;
-    const d = (config.depth ?? 2) / 2;
+    const dims = config.dimensions;
+    const w = (dims ? dims[0] : config.width ?? 2) / 2;
+    const h = (dims ? dims[1] : config.height ?? 2) / 2;
+    const d = (dims ? dims[2] : config.depth ?? 2) / 2;
     const color = config.fillColor ?? config.color ?? "#58C4DD";
     const light = config.lightDirection ? V.normalize(config.lightDirection) : DEFAULT_LIGHT;
     const faceCfg: VMobjectConfig = {
@@ -301,9 +632,24 @@ export class Box extends VGroup {
   }
 }
 
+// A box with the given [width, height, depth] (manim's Prism, default [3,2,1]).
+export interface PrismConfig extends SurfaceConfig {
+  dimensions?: [number, number, number];
+}
+
+export class Prism extends Box {
+  dimensions: [number, number, number];
+
+  constructor(config: PrismConfig = {}) {
+    const dims = (config.dimensions ?? [3, 2, 1]) as [number, number, number];
+    super({ ...config, dimensions: dims });
+    this.dimensions = dims;
+  }
+}
+
 export class Cube extends Box {
   constructor(config: SurfaceConfig = {}) {
     const s = config.sideLength ?? 2;
-    super({ ...config, width: s, height: s, depth: s });
+    super({ ...config, dimensions: [s, s, s] });
   }
 }
