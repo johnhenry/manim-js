@@ -15,16 +15,31 @@ import { VMobject, VGroup } from "./VMobject.ts";
 import { Color } from "../core/color.ts";
 import * as V from "../core/math/vector.ts";
 import { parsePathToSubpaths, subpathsToVMobject } from "./svg_path.ts";
+import type { ColorLike } from "../core/types.ts";
 
-let _defaultFont = null;
+/** Configuration accepted by VText. */
+export interface VTextConfig {
+  fontSize?: number;
+  font?: any;
+  color?: ColorLike;
+  fillColor?: ColorLike;
+  strokeColor?: ColorLike;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  strokeOpacity?: number;
+  point?: number[];
+  [key: string]: any;
+}
 
-export function getDefaultFont() {
+let _defaultFont: any = null;
+
+export function getDefaultFont(): any {
   return _defaultFont;
 }
 
 // Preload a font for the browser (or override the default in Node).
 //   await setDefaultFont("/fonts/Inter.ttf")
-export async function setDefaultFont(source) {
+export async function setDefaultFont(source: any): Promise<any> {
   if (typeof source === "string") {
     const opentype = (await import("opentype.js")).default;
     const buf = await fetch(source).then((r) => r.arrayBuffer());
@@ -38,7 +53,7 @@ export async function setDefaultFont(source) {
   return _defaultFont;
 }
 
-export function setDefaultFontSync(font) {
+export function setDefaultFontSync(font: any): any {
   _defaultFont = font;
   return font;
 }
@@ -46,7 +61,10 @@ export function setDefaultFontSync(font) {
 const UNITS_PER_WORLD = 100; // opentype path uses px; we render at this px size then scale to world
 
 export class VText extends VGroup {
-  constructor(text = "", config = {}) {
+  text: string;
+  fontSize: number;
+
+  constructor(text = "", config: VTextConfig = {}) {
     super();
     this.text = String(text);
     this.fontSize = config.fontSize ?? 0.7; // world cap-height-ish
@@ -71,7 +89,7 @@ export class VText extends VGroup {
     else this.center();
   }
 
-  _buildGlyphs(font, config) {
+  _buildGlyphs(font: any, config: VTextConfig): void {
     const px = UNITS_PER_WORLD;
     const scaleToWorld = this.fontSize / px * 1.4; // approx cap-height mapping
     // Iterate characters with charToGlyph (avoids GSUB shaping, which opentype.js
@@ -98,10 +116,10 @@ export class VText extends VGroup {
     }
   }
 
-  setStyle(style) {
-    for (const g of this.submobjects) g.setStyle(style);
+  setStyle(style: any): this {
+    for (const g of this.submobjects) (g as any).setStyle(style);
     return this;
   }
 }
 
-export function setStyle() { /* placeholder to keep VGroup happy if referenced */ }
+export function setStyle(): void { /* placeholder to keep VGroup happy if referenced */ }

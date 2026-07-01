@@ -6,10 +6,52 @@ import { VMobject, VGroup } from "./VMobject.ts";
 import * as V from "../core/math/vector.ts";
 import { Line, Arrow } from "./geometry.ts";
 import { Text } from "./text/Text.ts";
+import type { Vec3, ColorLike } from "../core/types.ts";
+
+/** Config for NumberLine. */
+export interface NumberLineConfig {
+  xRange?: number[];
+  range?: number[];
+  length?: number;
+  color?: ColorLike;
+  tickSize?: number;
+  includeNumbers?: boolean;
+  includeTip?: boolean;
+  fontSize?: number;
+  [key: string]: any;
+}
+
+/** Config for Axes. */
+export interface AxesConfig {
+  xRange?: number[];
+  yRange?: number[];
+  xLength?: number;
+  yLength?: number;
+  color?: ColorLike;
+  axisConfig?: NumberLineConfig;
+  [key: string]: any;
+}
+
+/** Config for plot / graph helpers. */
+export interface PlotConfig {
+  xRange?: number[];
+  color?: ColorLike;
+  [key: string]: any;
+}
+
+/** Config for NumberPlane. */
+export interface NumberPlaneConfig extends AxesConfig {
+  backgroundLineStyle?: {
+    color?: ColorLike;
+    strokeWidth?: number;
+    strokeOpacity?: number;
+    [key: string]: any;
+  };
+}
 
 // Inclusive-ish range: values from start up to (and including, within eps) stop.
-function makeTickRange([start, stop, step]) {
-  const out = [];
+function makeTickRange([start, stop, step]: number[]): number[] {
+  const out: number[] = [];
   if (step === 0) return out;
   const eps = 1e-6 * Math.abs(step);
   if (step > 0) for (let x = start; x <= stop + eps; x += step) out.push(x);
@@ -18,7 +60,21 @@ function makeTickRange([start, stop, step]) {
 }
 
 export class NumberLine extends VGroup {
-  constructor(config = {}) {
+  xMin: number;
+  xMax: number;
+  xStep: number;
+  length: number;
+  tickSize: number;
+  includeNumbers: boolean;
+  includeTip: boolean;
+  fontSize: number;
+  unit: number;
+  _leftX: number;
+  axisLine!: Line | Arrow;
+  ticks!: VGroup;
+  numbers!: VGroup;
+
+  constructor(config: NumberLineConfig = {}) {
     super();
     const range = config.xRange ?? config.range ?? [-5, 5, 1];
     this.xMin = range[0];
@@ -26,7 +82,7 @@ export class NumberLine extends VGroup {
     this.xStep = range[2] ?? 1;
     // Default: 1 world unit per data unit.
     this.length = config.length ?? (this.xMax - this.xMin);
-    this.color = config.color ?? "#FFFFFF";
+    this.color = (config.color ?? "#FFFFFF") as any;
     this.tickSize = config.tickSize ?? 0.1;
     this.includeNumbers = config.includeNumbers ?? false;
     this.includeTip = config.includeTip ?? false;
@@ -78,37 +134,44 @@ export class NumberLine extends VGroup {
     this.add(this.numbers);
   }
 
-  _formatNumber(x) {
+  _formatNumber(x: number): string {
     // Trim floating noise; drop trailing zeros.
     const r = Math.round(x * 1e6) / 1e6;
     return Number.isInteger(r) ? String(r) : String(parseFloat(r.toFixed(3)));
   }
 
-  getTickRange() {
+  getTickRange(): number[] {
     return makeTickRange([this.xMin, this.xMax, this.xStep]);
   }
 
   // Data number -> world point on the line.
-  numberToPoint(x) {
+  numberToPoint(x: number): Vec3 {
     return [this._leftX + (x - this.xMin) * this.unit, 0, 0];
   }
-  n2p(x) { return this.numberToPoint(x); }
+  n2p(x: number): Vec3 { return this.numberToPoint(x); }
 
   // World point -> data number (projected onto the line's x-axis).
-  pointToNumber(p) {
+  pointToNumber(p: number[]): number {
     return this.xMin + (p[0] - this._leftX) / this.unit;
   }
-  p2n(p) { return this.pointToNumber(p); }
+  p2n(p: number[]): number { return this.pointToNumber(p); }
 }
 
 export class Axes extends VGroup {
-  constructor(config = {}) {
+  xRange: number[];
+  yRange: number[];
+  xLength: number;
+  yLength: number;
+  xAxis: NumberLine;
+  yAxis: NumberLine;
+
+  constructor(config: AxesConfig = {}) {
     super();
     this.xRange = config.xRange ?? [-5, 5, 1];
     this.yRange = config.yRange ?? [-5, 5, 1];
     this.xLength = config.xLength ?? (this.xRange[1] - this.xRange[0]);
     this.yLength = config.yLength ?? (this.yRange[1] - this.yRange[0]);
-    this.color = config.color ?? "#FFFFFF";
+    this.color = (config.color ?? "#FFFFFF") as any;
     const axisConfig = config.axisConfig ?? {};
 
     this.xAxis = new NumberLine({
@@ -140,7 +203,7 @@ export class Axes extends VGroup {
   }
 
   // World point of data value y on the (rotated) y-axis, before origin shift.
-  _rawYPoint(y) {
+  _rawYPoint(y: number): Vec3 {
     // The unrotated point is [leftX + (y-min)*unit, 0, 0]; a +90deg rotation
     // about origin maps [a,0,0] -> [0,a,0].
     const a = this.yAxis._leftX + (y - this.yAxis.xMin) * this.yAxis.unit;
@@ -148,7 +211,7 @@ export class Axes extends VGroup {
   }
 
   // Data coords (x,y) -> world point. Composes the two axis mappings.
-  coordsToPoint(x, y) {
+  coordsToPoint(x: number, y: number): Vec3 {
     const px = this.xAxis.numberToPoint(x);
     const py = this.yAxis.numberToPoint(0); // reference (origin) on y-axis
     // xAxis contributes horizontal offset, yAxis contributes vertical offset.
@@ -156,30 +219,30 @@ export class Axes extends VGroup {
     const yWorld = this._yWorld(y);
     return [xWorld, yWorld, 0];
   }
-  c2p(x, y) { return this.coordsToPoint(x, y); }
+  c2p(x: number, y: number): Vec3 { return this.coordsToPoint(x, y); }
 
   // Vertical world coordinate for data value y (after the y-axis was rotated
   // and shifted so its zero sits at the origin).
-  _yWorld(y) {
+  _yWorld(y: number): number {
     return (y - this.yAxis.xMin) * this.yAxis.unit - (0 - this.yAxis.xMin) * this.yAxis.unit;
   }
 
   // World point -> data coords (inverts coordsToPoint).
-  pointToCoords(p) {
+  pointToCoords(p: number[]): number[] {
     const x = this.xAxis.xMin + (p[0] - this.xAxis.numberToPoint(this.xAxis.xMin)[0]) / this.xAxis.unit;
     const y = p[1] / this.yAxis.unit; // _yWorld(y) == y * unit
     return [x, y];
   }
-  p2c(p) { return this.pointToCoords(p); }
+  p2c(p: number[]): number[] { return this.pointToCoords(p); }
 
   // Sample y=fn(x) across the x range and build a poly-line curve.
-  plot(fn, config = {}) {
+  plot(fn: (x: number) => number, config: PlotConfig = {}): VMobject {
     const range = config.xRange ?? this.xRange;
     const color = config.color ?? "#FFFF00";
     const start = range[0];
     const stop = range[1];
     const step = range[2] ?? (stop - start) / 200;
-    const corners = [];
+    const corners: number[][] = [];
     const eps = 1e-6 * Math.abs(step || 1);
     for (let x = start; x <= stop + eps; x += step) {
       const y = fn(x);
@@ -188,14 +251,14 @@ export class Axes extends VGroup {
     const graph = new VMobject({ strokeColor: color, color });
     graph.setPointsAsCorners(corners);
     graph.fillOpacity = 0;
-    graph.underlyingFunction = fn;
+    (graph as any).underlyingFunction = fn;
     return graph;
   }
 
-  getGraph(fn, config = {}) { return this.plot(fn, config); }
+  getGraph(fn: (x: number) => number, config: PlotConfig = {}): VMobject { return this.plot(fn, config); }
 
   // A straight line in data space between two coord pairs.
-  plotLine([x1, y1], [x2, y2], config = {}) {
+  plotLine([x1, y1]: number[], [x2, y2]: number[], config: PlotConfig = {}): Line {
     const color = config.color ?? this.color;
     return new Line(this.coordsToPoint(x1, y1), this.coordsToPoint(x2, y2), {
       color,
@@ -204,7 +267,7 @@ export class Axes extends VGroup {
   }
 
   // Vertical segment from the x-axis up to the graph at data-x.
-  getVerticalLine(x, graphOrY, config = {}) {
+  getVerticalLine(x: number, graphOrY: number | ((x: number) => number) | any, config: PlotConfig = {}): Line {
     const y = typeof graphOrY === "function"
       ? graphOrY(x)
       : (graphOrY?.underlyingFunction ? graphOrY.underlyingFunction(x) : graphOrY);
@@ -217,7 +280,12 @@ export class Axes extends VGroup {
 }
 
 export class NumberPlane extends Axes {
-  constructor(config = {}) {
+  bgColor: ColorLike;
+  bgStrokeWidth: number;
+  bgStrokeOpacity: number;
+  backgroundLines!: VGroup;
+
+  constructor(config: NumberPlaneConfig = {}) {
     super(config);
     const bg = config.backgroundLineStyle ?? {};
     this.bgColor = bg.color ?? "#29ABCA";
@@ -227,7 +295,7 @@ export class NumberPlane extends Axes {
     this._buildGrid();
   }
 
-  _buildGrid() {
+  _buildGrid(): void {
     const grid = new VGroup();
     const yTop = this._yWorld(this.yRange[1]);
     const yBot = this._yWorld(this.yRange[0]);
@@ -250,7 +318,7 @@ export class NumberPlane extends Axes {
     this.submobjects = [grid, ...this.submobjects];
   }
 
-  _faintLine(start, end) {
+  _faintLine(start: number[], end: number[]): Line {
     const line = new Line(start, end, {
       strokeColor: this.bgColor,
       color: this.bgColor,

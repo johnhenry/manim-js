@@ -4,14 +4,42 @@
 // renderer special-cases it.
 
 import { Mobject } from "../Mobject.ts";
+import type { MobjectConfig } from "../Mobject.ts";
 import { Color } from "../../core/color.ts";
 import * as V from "../../core/math/vector.ts";
+import type { ColorLike } from "../../core/types.ts";
+
+/** Configuration accepted by the raster Text mobject. */
+export interface TextConfig extends MobjectConfig {
+  fontSize?: number;
+  font?: string;
+  weight?: string;
+  slant?: string;
+  align?: string;
+  fillColor?: ColorLike;
+  fillOpacity?: number;
+  point?: number[];
+  at?: number[];
+}
 
 // Rough per-character width factor for layout estimation without a context.
 const CHAR_ASPECT = 0.55;
 
 export class Text extends Mobject {
-  constructor(text = "", config = {}) {
+  _isText: boolean;
+  text: string;
+  fontSize: number;
+  font: string;
+  weight: string;
+  slant: string;
+  align: string;
+  fillColor: Color;
+  fillOpacity: number;
+  strokeOpacity: number;
+  revealFraction: number;
+  numLines: number;
+
+  constructor(text = "", config: TextConfig = {}) {
     super(config);
     this._isText = true;
     this.text = String(text);
@@ -47,33 +75,33 @@ export class Text extends Mobject {
     this.numLines = lines.length;
   }
 
-  setColor(color) {
+  setColor(color: ColorLike): this {
     this.fillColor = Color.parse(color);
     this.color = Color.parse(color);
     return this;
   }
 
-  setOpacity(o) {
+  setOpacity(o: number): this {
     this.fillOpacity = o;
     this.opacity = o;
     return this;
   }
 
   // The world-space font height after any scaling applied to the box.
-  currentFontHeight() {
+  currentFontHeight(): number {
     return (this.getHeight() / Math.max(1, this.numLines)) / 1.2;
   }
 
-  interpolate(start, target, alpha) {
+  interpolate(start: any, target: any, alpha: number): this {
     const n = Math.min(this.points.length, start.points.length, target.points.length);
-    for (let i = 0; i < n; i++) this.points[i] = V.lerp(start.points[i], target.points[i], alpha);
+    for (let i = 0; i < n; i++) this.points[i] = V.lerp(start.points[i] as number[], target.points[i] as number[], alpha);
     this.fillColor = Color.lerp(start.fillColor, target.fillColor, alpha);
     this.fillOpacity = start.fillOpacity + (target.fillOpacity - start.fillOpacity) * alpha;
     this.opacity = start.opacity + (target.opacity - start.opacity) * alpha;
     return this;
   }
 
-  copy() {
+  copy(): this {
     const c = super.copy();
     c.fillColor = Color.parse(this.fillColor);
     return c;

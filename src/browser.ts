@@ -8,12 +8,27 @@ import { QUALITIES } from "./index.ts";
 
 export * from "./index.ts";
 
-function makeScene(sceneOrConstruct, config) {
+// Options accepted by the browser backend's play() / record(). All optional.
+export interface BrowserOptions {
+  canvas?: any;
+  background?: string;
+  loop?: boolean;
+  quality?: string;
+  pixelWidth?: number;
+  pixelHeight?: number;
+  fps?: number;
+  camera?: any;
+  mimeType?: string;
+  bitrate?: number;
+  [key: string]: any;
+}
+
+function makeScene(sceneOrConstruct: any, config: any) {
   if (sceneOrConstruct.prototype instanceof Scene) return new sceneOrConstruct(config);
   return new Scene(config);
 }
 
-async function runConstruct(sceneOrConstruct, scene) {
+async function runConstruct(sceneOrConstruct: any, scene: any) {
   if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
     await sceneOrConstruct(scene);
   } else {
@@ -23,7 +38,7 @@ async function runConstruct(sceneOrConstruct, scene) {
 
 // Play a scene live on a canvas element at real-time speed.
 //   await play(MyScene, { canvas, quality: "medium" })
-export async function play(sceneOrConstruct, options = {}) {
+export async function play(sceneOrConstruct: any, options: BrowserOptions = {}) {
   const { canvas, background = "#000000", loop = false } = options;
   if (!canvas) throw new Error("browser play() requires an options.canvas element");
 
@@ -38,14 +53,14 @@ export async function play(sceneOrConstruct, options = {}) {
   const camera = new Camera({ pixelWidth, pixelHeight, background, ...options.camera });
   const renderer = new CanvasRenderer(ctx, camera);
 
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
 
   do {
     const scene = makeScene(sceneOrConstruct, { fps, camera });
     const start = performance.now();
     let frame = 0;
-    const played = new Set();
-    scene.frameHandler = async (mobjects) => {
+    const played = new Set<any>();
+    scene.frameHandler = async (mobjects: any) => {
       renderer.renderScene(mobjects);
       // Fire scheduled sounds as the animation clock reaches them.
       for (const s of scene.sounds) {
@@ -65,7 +80,7 @@ export async function play(sceneOrConstruct, options = {}) {
   return { canvas };
 }
 
-function playSound(s) {
+function playSound(s: any) {
   try {
     const audio = new Audio(s.file);
     audio.volume = Math.max(0, Math.min(1, s.gain ?? 1));
@@ -74,14 +89,14 @@ function playSound(s) {
 }
 
 // Load an SVG file into an SVGMobject (browser: fetch the URL).
-export async function loadSVG(url, config = {}) {
+export async function loadSVG(url: string, config: any = {}) {
   const { SVGMobject } = await import("./mobject/svg_mobject.ts");
   const text = await fetch(url).then((r) => r.text());
   return new SVGMobject(text, config);
 }
 
 // Load a bitmap for ImageMobject (browser).
-export async function loadImage(src) {
+export async function loadImage(src: any) {
   if (typeof createImageBitmap === "function" && src instanceof Blob) return createImageBitmap(src);
   const img = new Image();
   img.crossOrigin = "anonymous";
@@ -93,7 +108,7 @@ export async function loadImage(src) {
 
 // Record a scene to a WebM Blob (offline, as fast as the browser allows).
 //   const blob = await record(MyScene, { quality: "high" });
-export async function record(sceneOrConstruct, options = {}) {
+export async function record(sceneOrConstruct: any, options: BrowserOptions = {}) {
   const q = QUALITIES[options.quality ?? "medium"] ?? QUALITIES.medium;
   const pixelWidth = options.pixelWidth ?? q.pixelWidth;
   const pixelHeight = options.pixelHeight ?? q.pixelHeight;
@@ -111,14 +126,14 @@ export async function record(sceneOrConstruct, options = {}) {
   const track = stream.getVideoTracks()[0];
   const mime = options.mimeType ?? (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
     ? "video/webm;codecs=vp9" : "video/webm");
-  const chunks = [];
+  const chunks: any[] = [];
   const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: options.bitrate ?? 8_000_000 });
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   recorder.start();
 
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
   const scene = makeScene(sceneOrConstruct, { fps, camera });
-  scene.frameHandler = async (mobjects) => {
+  scene.frameHandler = async (mobjects: any) => {
     renderer.renderScene(mobjects);
     // Push exactly one frame into the capture stream.
     if (track.requestFrame) track.requestFrame();
@@ -126,12 +141,12 @@ export async function record(sceneOrConstruct, options = {}) {
   };
   await runConstruct(sceneOrConstruct, scene);
 
-  await new Promise((res) => { recorder.onstop = res; recorder.stop(); });
+  await new Promise<void>((res) => { recorder.onstop = () => res(); recorder.stop(); });
   return new Blob(chunks, { type: "video/webm" });
 }
 
 // Convenience: trigger a browser download of a recorded scene.
-export async function downloadWebM(sceneOrConstruct, filename = "scene.webm", options = {}) {
+export async function downloadWebM(sceneOrConstruct: any, filename = "scene.webm", options: BrowserOptions = {}) {
   const blob = await record(sceneOrConstruct, options);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

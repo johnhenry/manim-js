@@ -16,16 +16,34 @@ import { QUALITIES } from "./index.ts";
 export * from "./index.ts";
 export { ThreeRenderer };
 
-async function loadThree(options) {
+// Options accepted by the WebGL browser backend's play() / record(). All optional.
+export interface ThreeOptions {
+  canvas?: any;
+  background?: string;
+  loop?: boolean;
+  quality?: string;
+  pixelWidth?: number;
+  pixelHeight?: number;
+  fps?: number;
+  camera?: any;
+  mode?: string;
+  antialias?: boolean;
+  bitrate?: number;
+  three?: any;
+  [key: string]: any;
+}
+
+// import("three") result is treated as `any` (may lack precise types here).
+async function loadThree(options: ThreeOptions): Promise<any> {
   return options.three ?? (await import("three"));
 }
 
-function makeScene(sceneOrConstruct, config) {
+function makeScene(sceneOrConstruct: any, config: any) {
   if (sceneOrConstruct.prototype instanceof Scene) return new sceneOrConstruct(config);
   return new Scene(config);
 }
 
-async function runConstruct(sceneOrConstruct, scene) {
+async function runConstruct(sceneOrConstruct: any, scene: any) {
   if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
     await sceneOrConstruct(scene);
   } else {
@@ -33,7 +51,7 @@ async function runConstruct(sceneOrConstruct, scene) {
   }
 }
 
-function resolveCamera(options, pixelWidth, pixelHeight, background) {
+function resolveCamera(options: ThreeOptions, pixelWidth: number, pixelHeight: number, background: string): any {
   let camera = options.camera;
   if (!camera) camera = options.mode === "2d" ? new Camera() : new ThreeDCamera();
   camera.pixelWidth = pixelWidth;
@@ -44,7 +62,7 @@ function resolveCamera(options, pixelWidth, pixelHeight, background) {
 }
 
 // Live real-time playback on a canvas, GPU-rendered.
-export async function play(sceneOrConstruct, options = {}) {
+export async function play(sceneOrConstruct: any, options: ThreeOptions = {}) {
   const { canvas, background = "#000000", loop = false } = options;
   if (!canvas) throw new Error("browser-three play() requires an options.canvas element");
   const THREE = await loadThree(options);
@@ -58,13 +76,13 @@ export async function play(sceneOrConstruct, options = {}) {
 
   const camera = resolveCamera(options, pixelWidth, pixelHeight, background);
   const renderer = new ThreeRenderer(THREE, { canvas, camera, background, antialias: options.antialias ?? true });
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
 
   do {
     const scene = makeScene(sceneOrConstruct, { fps, camera });
     const start = performance.now();
     let frame = 0;
-    scene.frameHandler = async (mobjects) => {
+    scene.frameHandler = async (mobjects: any) => {
       renderer.render(mobjects);
       frame++;
       const target = start + (frame * 1000) / fps;
@@ -77,7 +95,7 @@ export async function play(sceneOrConstruct, options = {}) {
 }
 
 // Record a scene to a WebM Blob, GPU-rendered.
-export async function record(sceneOrConstruct, options = {}) {
+export async function record(sceneOrConstruct: any, options: ThreeOptions = {}) {
   const THREE = await loadThree(options);
   const q = QUALITIES[options.quality ?? "medium"] ?? QUALITIES.medium;
   const pixelWidth = options.pixelWidth ?? q.pixelWidth;
@@ -94,20 +112,20 @@ export async function record(sceneOrConstruct, options = {}) {
   const stream = canvas.captureStream(0);
   const track = stream.getVideoTracks()[0];
   const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
-  const chunks = [];
+  const chunks: any[] = [];
   const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: options.bitrate ?? 8_000_000 });
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   recorder.start();
 
-  const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+  const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
   const scene = makeScene(sceneOrConstruct, { fps, camera });
-  scene.frameHandler = async (mobjects) => {
+  scene.frameHandler = async (mobjects: any) => {
     renderer.render(mobjects);
     if (track.requestFrame) track.requestFrame();
     await nextFrame();
   };
   await runConstruct(sceneOrConstruct, scene);
 
-  await new Promise((res) => { recorder.onstop = res; recorder.stop(); });
+  await new Promise<void>((res) => { recorder.onstop = () => res(); recorder.stop(); });
   return new Blob(chunks, { type: "video/webm" });
 }

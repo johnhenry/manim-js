@@ -1,7 +1,14 @@
 // Color handling. Internally a color is {r, g, b, a} with channels in [0, 1].
 // Accepts hex strings, {r,g,b} objects, or existing Color instances.
 
+import type { ColorLike } from "./types.ts";
+
 export class Color {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+
   constructor(r = 1, g = 1, b = 1, a = 1) {
     this.r = r;
     this.g = g;
@@ -9,7 +16,7 @@ export class Color {
     this.a = a;
   }
 
-  static parse(input) {
+  static parse(input: ColorLike | Color | null | undefined): Color {
     if (input == null) return new Color(1, 1, 1, 1);
     if (input instanceof Color) return new Color(input.r, input.g, input.b, input.a);
     if (typeof input === "string") return Color.fromHex(input);
@@ -18,7 +25,7 @@ export class Color {
     return new Color();
   }
 
-  static fromHex(hex) {
+  static fromHex(hex: string): Color {
     let h = hex.trim().replace(/^#/, "");
     if (h.length === 3) h = h.split("").map((c) => c + c).join("");
     const int = parseInt(h.slice(0, 6), 16);
@@ -29,12 +36,12 @@ export class Color {
     return new Color(r, g, b, a);
   }
 
-  withAlpha(a) {
+  withAlpha(a: number): Color {
     return new Color(this.r, this.g, this.b, a);
   }
 
   // Linear interpolation in RGB space (manim's default color interpolation).
-  static lerp(c1, c2, t) {
+  static lerp(c1: ColorLike | Color, c2: ColorLike | Color, t: number): Color {
     const a = Color.parse(c1);
     const b = Color.parse(c2);
     return new Color(
@@ -45,15 +52,15 @@ export class Color {
     );
   }
 
-  toRGBAString(alphaOverride = null) {
+  toRGBAString(alphaOverride: number | null = null): string {
     const a = alphaOverride == null ? this.a : alphaOverride;
-    const to255 = (x) => Math.round(Math.max(0, Math.min(1, x)) * 255);
+    const to255 = (x: number) => Math.round(Math.max(0, Math.min(1, x)) * 255);
     return `rgba(${to255(this.r)}, ${to255(this.g)}, ${to255(this.b)}, ${a})`;
   }
 
-  toHex() {
-    const to255 = (x) => Math.round(Math.max(0, Math.min(1, x)) * 255);
-    const hx = (x) => to255(x).toString(16).padStart(2, "0");
+  toHex(): string {
+    const to255 = (x: number) => Math.round(Math.max(0, Math.min(1, x)) * 255);
+    const hx = (x: number) => to255(x).toString(16).padStart(2, "0");
     return `#${hx(this.r)}${hx(this.g)}${hx(this.b)}`;
   }
 }

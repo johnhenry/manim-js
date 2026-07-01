@@ -4,12 +4,26 @@
 // depth-tested triangles; strokes become depth-tested thick lines. Depth is the
 // camera-space value from ThreeDCamera.projectionDepth (larger = nearer).
 
+interface ZVertex {
+  x: number;
+  y: number;
+  z: number;
+  r?: number;
+  g?: number;
+  b?: number;
+}
+
 export class ZBuffer {
-  constructor(width, height) {
+  width!: number;
+  height!: number;
+  color!: Uint8ClampedArray;
+  depth!: Float32Array;
+
+  constructor(width: number, height: number) {
     this.resize(width, height);
   }
 
-  resize(width, height) {
+  resize(width: number, height: number): void {
     if (this.width === width && this.height === height) return;
     this.width = width;
     this.height = height;
@@ -17,7 +31,7 @@ export class ZBuffer {
     this.depth = new Float32Array(width * height);
   }
 
-  clear(r, g, b) {
+  clear(r: number, g: number, b: number): void {
     const { color, depth } = this;
     for (let i = 0; i < depth.length; i++) {
       const j = i * 4;
@@ -26,7 +40,7 @@ export class ZBuffer {
     }
   }
 
-  _blend(idx, r, g, b, a) {
+  _blend(idx: number, r: number, g: number, b: number, a: number): void {
     const j = idx * 4;
     const c = this.color;
     if (a >= 0.999) {
@@ -41,7 +55,7 @@ export class ZBuffer {
   }
 
   // v0,v1,v2: {x, y, z} in pixel space with camera depth z. color: [r,g,b] 0-255.
-  triangle(v0, v1, v2, color, alpha) {
+  triangle(v0: ZVertex, v1: ZVertex, v2: ZVertex, color: number[], alpha: number): void {
     const { width, height, depth } = this;
     let minX = Math.max(0, Math.floor(Math.min(v0.x, v1.x, v2.x)));
     let maxX = Math.min(width - 1, Math.ceil(Math.max(v0.x, v1.x, v2.x)));
@@ -75,7 +89,7 @@ export class ZBuffer {
 
   // Like triangle(), but each vertex carries its own color {x,y,z,r,g,b} and the
   // color is barycentric-interpolated per pixel (Gouraud smooth shading).
-  triangleGouraud(v0, v1, v2, alpha) {
+  triangleGouraud(v0: ZVertex, v1: ZVertex, v2: ZVertex, alpha: number): void {
     const { width, height, depth } = this;
     let minX = Math.max(0, Math.floor(Math.min(v0.x, v1.x, v2.x)));
     let maxX = Math.min(width - 1, Math.ceil(Math.max(v0.x, v1.x, v2.x)));
@@ -111,7 +125,7 @@ export class ZBuffer {
 
   // Depth-tested thick line between pixel-space endpoints (with depth z each).
   // `bias` nudges depth toward the viewer so edges sit atop the faces they trim.
-  line(p0, p1, halfWidth, color, alpha, bias = 0) {
+  line(p0: ZVertex, p1: ZVertex, halfWidth: number, color: number[], alpha: number, bias = 0): void {
     const { width, height, depth } = this;
     const dx = p1.x - p0.x, dy = p1.y - p0.y;
     const len = Math.hypot(dx, dy);
@@ -140,7 +154,7 @@ export class ZBuffer {
   }
 
   // Copy the framebuffer into the 2D context.
-  blitTo(ctx) {
+  blitTo(ctx: CanvasRenderingContext2D): void {
     const img = ctx.createImageData(this.width, this.height);
     img.data.set(this.color);
     ctx.putImageData(img, 0, 0);

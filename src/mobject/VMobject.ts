@@ -4,12 +4,37 @@
 // indices at which a new "moveTo" begins.
 
 import { Mobject } from "./Mobject.ts";
+import type { MobjectConfig } from "./Mobject.ts";
 import { Color } from "../core/color.ts";
 import * as V from "../core/math/vector.ts";
 import { bezier, straightControlPoints, partialBezier } from "../core/math/bezier.ts";
+import type { Vec3, ColorLike } from "../core/types.ts";
+
+/** Configuration accepted by VMobject (extends the base Mobject config). */
+export interface VMobjectConfig extends MobjectConfig {
+  strokeColor?: ColorLike;
+  strokeWidth?: number;
+  strokeOpacity?: number;
+  fillColor?: ColorLike;
+  fillOpacity?: number;
+  lineJoin?: CanvasLineJoin;
+  lineCap?: CanvasLineCap;
+}
 
 export class VMobject extends Mobject {
-  constructor(config = {}) {
+  subpathStarts: number[];
+  strokeColor: Color;
+  strokeWidth: number;
+  strokeOpacity: number;
+  fillColor: Color;
+  fillOpacity: number;
+  lineJoin: CanvasLineJoin;
+  lineCap: CanvasLineCap;
+  strokeStart: number;
+  strokeEnd: number;
+  _straightPath?: boolean;
+
+  constructor(config: VMobjectConfig = {}) {
     super(config);
     this.subpathStarts = []; // indices into this.points where a subpath begins
 
@@ -28,18 +53,18 @@ export class VMobject extends Mobject {
   }
 
   // --- path construction --------------------------------------------------
-  startNewPath(point) {
+  startNewPath(point: number[]): this {
     this.subpathStarts.push(this.points.length);
     this.points.push(V.clone(point));
     return this;
   }
 
-  addCubicBezier(handle1, handle2, anchor) {
+  addCubicBezier(handle1: number[], handle2: number[], anchor: number[]): this {
     this.points.push(V.clone(handle1), V.clone(handle2), V.clone(anchor));
     return this;
   }
 
-  addLineTo(point) {
+  addLineTo(point: number[]): this {
     const last = this.points[this.points.length - 1];
     const [c1, c2] = straightControlPoints(last, point);
     return this.addCubicBezier(c1, c2, point);
@@ -47,7 +72,7 @@ export class VMobject extends Mobject {
 
   // Build an open/closed path through a list of corner points using straight
   // bezier segments. This is how Line / Polygon / Rectangle are defined.
-  setPointsAsCorners(corners) {
+  setPointsAsCorners(corners: number[][]): this {
     this.points = [];
     this.subpathStarts = [0];
     this._straightPath = true; // segments are straight -> cheap to flatten (z-buffer)
@@ -59,14 +84,14 @@ export class VMobject extends Mobject {
 
   // Directly append a pre-computed bezier point list as one subpath. `pts` must
   // have length 1 + 3k (an anchor followed by control/control/anchor triples).
-  appendBezierPoints(pts, newSubpath = true) {
+  appendBezierPoints(pts: number[][], newSubpath = true): this {
     if (pts.length === 0) return this;
     if (newSubpath || this.points.length === 0) this.subpathStarts.push(this.points.length);
     for (const p of pts) this.points.push(V.clone(p));
     return this;
   }
 
-  close() {
+  close(): this {
     // Close the current subpath back to its start anchor.
     const start = this.subpathStarts[this.subpathStarts.length - 1] ?? 0;
     const first = this.points[start];
@@ -76,10 +101,10 @@ export class VMobject extends Mobject {
   }
 
   // --- queries ------------------------------------------------------------
-  getSubpaths() {
+  getSubpaths(): number[][][] {
     if (this.points.length === 0) return [];
     const starts = this.subpathStarts.length ? [...this.subpathStarts] : [0];
-    const paths = [];
+    const paths: number[][][] = [];
     for (let i = 0; i < starts.length; i++) {
       const s = starts[i];
       const e = i + 1 < starts.length ? starts[i + 1] : this.points.length;
@@ -89,15 +114,15 @@ export class VMobject extends Mobject {
     return paths;
   }
 
-  getNumCurves() {
+  getNumCurves(): number {
     let n = 0;
     for (const sp of this.getSubpaths()) n += Math.max(0, Math.floor((sp.length - 1) / 3));
     return n;
   }
 
   // Point at proportion alpha in [0,1] along the whole (multi-subpath) outline.
-  pointFromProportion(alpha) {
-    const curves = [];
+  pointFromProportion(alpha: number): number[] {
+    const curves: number[][][] = [];
     for (const sp of this.getSubpaths()) {
       const nc = Math.floor((sp.length - 1) / 3);
       for (let i = 0; i < nc; i++) curves.push([sp[3 * i], sp[3 * i + 1], sp[3 * i + 2], sp[3 * i + 3]]);
@@ -111,20 +136,20 @@ export class VMobject extends Mobject {
   }
 
   // --- style --------------------------------------------------------------
-  setFill(color, opacity = 1) {
+  setFill(color: ColorLike | null, opacity = 1): this {
     if (color != null) this.fillColor = Color.parse(color);
     this.fillOpacity = opacity;
     return this;
   }
 
-  setStroke(color, width, opacity = 1) {
+  setStroke(color: ColorLike | null, width?: number | null, opacity = 1): this {
     if (color != null) this.strokeColor = Color.parse(color);
     if (width != null) this.strokeWidth = width;
     this.strokeOpacity = opacity;
     return this;
   }
 
-  setColor(color) {
+  setColor(color: ColorLike): this {
     this.color = Color.parse(color);
     this.strokeColor = Color.parse(color);
     this.fillColor = Color.parse(color);
@@ -132,7 +157,13 @@ export class VMobject extends Mobject {
     return this;
   }
 
-  setStyle({ fillColor, fillOpacity, strokeColor, strokeWidth, strokeOpacity } = {}) {
+  setStyle({ fillColor, fillOpacity, strokeColor, strokeWidth, strokeOpacity }: {
+    fillColor?: ColorLike;
+    fillOpacity?: number;
+    strokeColor?: ColorLike;
+    strokeWidth?: number;
+    strokeOpacity?: number;
+  } = {}): this {
     if (fillColor != null) this.fillColor = Color.parse(fillColor);
     if (fillOpacity != null) this.fillOpacity = fillOpacity;
     if (strokeColor != null) this.strokeColor = Color.parse(strokeColor);
@@ -141,7 +172,7 @@ export class VMobject extends Mobject {
     return this;
   }
 
-  setOpacity(o) {
+  setOpacity(o: number): this {
     this.fillOpacity = o;
     this.strokeOpacity = o;
     this.opacity = o;
@@ -151,8 +182,8 @@ export class VMobject extends Mobject {
 
   // --- transform support: make two vmobjects have matching point counts ---
   // Resample this subpath's bezier list to exactly `nCurves` curves.
-  static _resampleSubpath(sp, nCurves) {
-    const curves = [];
+  static _resampleSubpath(sp: number[][], nCurves: number): number[][] {
+    const curves: number[][][] = [];
     const existing = Math.floor((sp.length - 1) / 3);
     if (existing === 0) {
       const only = sp[0] ?? [0, 0, 0];
@@ -174,13 +205,13 @@ export class VMobject extends Mobject {
   }
 
   // Rebuild this VMobject so its points align 1:1 with `other` for interpolation.
-  alignPointsWith(other) {
+  alignPointsWith(other: VMobject): this {
     const a = this.getSubpaths();
     const b = other.getSubpaths();
     const nSub = Math.max(a.length, b.length);
-    const newPoints = [];
-    const newStarts = [];
-    const lastOf = (arr) => (arr.length ? arr[arr.length - 1] : [0, 0, 0]);
+    const newPoints: number[][] = [];
+    const newStarts: number[] = [];
+    const lastOf = (arr: number[][]): number[] => (arr.length ? arr[arr.length - 1] : [0, 0, 0]);
     for (let i = 0; i < nSub; i++) {
       const sa = a[i] ?? [lastOf(a[a.length - 1] ?? [])];
       const sb = b[i] ?? [lastOf(b[b.length - 1] ?? [])];
@@ -194,9 +225,9 @@ export class VMobject extends Mobject {
     return this;
   }
 
-  interpolate(start, target, alpha) {
+  interpolate(start: any, target: any, alpha: number): this {
     const n = Math.min(this.points.length, start.points.length, target.points.length);
-    for (let i = 0; i < n; i++) this.points[i] = V.lerp(start.points[i], target.points[i], alpha);
+    for (let i = 0; i < n; i++) this.points[i] = V.lerp(start.points[i] as number[], target.points[i] as number[], alpha);
     this.fillColor = Color.lerp(start.fillColor, target.fillColor, alpha);
     this.strokeColor = Color.lerp(start.strokeColor, target.strokeColor, alpha);
     this.fillOpacity = start.fillOpacity + (target.fillOpacity - start.fillOpacity) * alpha;
@@ -207,7 +238,7 @@ export class VMobject extends Mobject {
     return this;
   }
 
-  copy() {
+  copy(): this {
     const c = super.copy();
     c.strokeColor = Color.parse(this.strokeColor);
     c.fillColor = Color.parse(this.fillColor);
@@ -218,17 +249,17 @@ export class VMobject extends Mobject {
 
 // A plain container of VMobjects (manim's VGroup).
 export class VGroup extends VMobject {
-  constructor(...mobs) {
+  constructor(...mobs: (Mobject | Mobject[])[]) {
     super();
     this.add(...mobs);
   }
 
-  arrange(direction = V.RIGHT, buff = 0.25) {
+  arrange(direction: number[] = V.RIGHT, buff = 0.25): this {
     for (let i = 1; i < this.submobjects.length; i++) {
       this.submobjects[i].nextTo(this.submobjects[i - 1], direction, buff);
     }
     return this;
   }
 
-  get(i) { return this.submobjects[i]; }
+  get(i: number): Mobject { return this.submobjects[i]; }
 }

@@ -3,9 +3,15 @@
 // (flat point list per subpath, length 1 + 3k). Coordinates are returned in the
 // path's own space (SVG y-down); callers apply any transform / y-flip.
 
+// A single tokenized path element: either a command letter or a number.
+interface PathToken {
+  cmd?: string;
+  num?: number;
+}
+
 // Tokenize a path data string into [command, ...numbers] runs.
-function tokenize(d) {
-  const tokens = [];
+function tokenize(d: string): PathToken[] {
+  const tokens: PathToken[] = [];
   const re = /([a-zA-Z])|(-?\d*\.?\d+(?:[eE][-+]?\d+)?)/g;
   let m;
   while ((m = re.exec(d)) !== null) {
@@ -15,35 +21,36 @@ function tokenize(d) {
   return tokens;
 }
 
-const P = (x, y) => [x, y, 0];
-const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0];
+const P = (x: number, y: number): number[] => [x, y, 0];
+const lerp2 = (a: number[], b: number[], t: number): number[] =>
+  [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0];
 
 // Elevate a quadratic (p0, q, p2) to a cubic's two control points.
-function quadToCubic(p0, q, p2) {
+function quadToCubic(p0: number[], q: number[], p2: number[]): number[][] {
   return [
     [p0[0] + (2 / 3) * (q[0] - p0[0]), p0[1] + (2 / 3) * (q[1] - p0[1]), 0],
     [p2[0] + (2 / 3) * (q[0] - p2[0]), p2[1] + (2 / 3) * (q[1] - p2[1]), 0],
   ];
 }
 
-export function parsePathToSubpaths(d) {
+export function parsePathToSubpaths(d: string): number[][][] {
   const tokens = tokenize(d);
-  const subpaths = [];
-  let current = null; // flat point list for the active subpath
-  let start = null; // subpath start anchor (for Z)
-  let cursor = [0, 0, 0];
-  let lastCtrl = null; // for S / T reflection
+  const subpaths: number[][][] = [];
+  let current: number[][] | null = null; // flat point list for the active subpath
+  let start: number[] | null = null; // subpath start anchor (for Z)
+  let cursor: number[] = [0, 0, 0];
+  let lastCtrl: number[] | null = null; // for S / T reflection
   let lastCmd = "";
 
   let i = 0;
-  const nextNum = () => tokens[i++].num;
+  const nextNum = (): number => tokens[i++].num as number;
   const hasNum = () => i < tokens.length && tokens[i].num !== undefined;
 
-  const pushCubic = (c1, c2, end) => {
-    current.push(c1, c2, end);
+  const pushCubic = (c1: number[], c2: number[], end: number[]) => {
+    current!.push(c1, c2, end);
     cursor = end;
   };
-  const lineTo = (end) => {
+  const lineTo = (end: number[]) => {
     const c1 = lerp2(cursor, end, 1 / 3);
     const c2 = lerp2(cursor, end, 2 / 3);
     pushCubic(c1, c2, end);
@@ -58,7 +65,7 @@ export function parsePathToSubpaths(d) {
     if (tokens[i].cmd !== undefined) { cmd = tokens[i].cmd; i++; }
     else cmd = /[Mm]/.test(lastCmd) ? (lastCmd === "M" ? "L" : "l") : lastCmd; // implicit repeat
     const rel = cmd === cmd.toLowerCase();
-    const abs = (x, y) => (rel ? [cursor[0] + x, cursor[1] + y, 0] : [x, y, 0]);
+    const abs = (x: number, y: number): number[] => (rel ? [cursor[0] + x, cursor[1] + y, 0] : [x, y, 0]);
 
     switch (cmd.toUpperCase()) {
       case "M": {
@@ -144,7 +151,15 @@ export function parsePathToSubpaths(d) {
 
 // Build a VMobject (or fill an existing one) from parsed subpaths, applying a
 // transform: scale, then translate, with optional y-flip (SVG is y-down).
-export function subpathsToVMobject(vmobject, subpaths, { scale = 1, translate = [0, 0, 0], flipY = false } = {}) {
+export function subpathsToVMobject(
+  vmobject: any,
+  subpaths: number[][][],
+  { scale = 1, translate = [0, 0, 0], flipY = false }: {
+    scale?: number | number[];
+    translate?: number[];
+    flipY?: boolean;
+  } = {},
+): any {
   vmobject.points = [];
   vmobject.subpathStarts = [];
   const sx = typeof scale === "number" ? scale : scale[0];

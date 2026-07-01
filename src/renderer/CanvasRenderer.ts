@@ -5,25 +5,54 @@
 import { partialBezier, bezier } from "../core/math/bezier.ts";
 import { ZBuffer } from "./zbuffer.ts";
 import { Color } from "../core/color.ts";
+import type { Vec3, Ctx2D, ColorLike } from "../core/types.ts";
 
-const to255 = (c) => [
+const to255 = (c: { r: number; g: number; b: number }): [number, number, number] => [
   Math.round(Math.max(0, Math.min(1, c.r)) * 255),
   Math.round(Math.max(0, Math.min(1, c.g)) * 255),
   Math.round(Math.max(0, Math.min(1, c.b)) * 255),
 ];
 
-const parseHexColor = (str) => to255(Color.parse(str));
+const parseHexColor = (str: ColorLike): [number, number, number] => to255(Color.parse(str));
 
 // Average of a point list — a cheap face/mobject center for depth sorting.
-function centroid(points) {
+function centroid(points: number[][]): Vec3 {
   let x = 0, y = 0, z = 0;
   for (const p of points) { x += p[0]; y += p[1]; z += p[2]; }
   const n = points.length || 1;
   return [x / n, y / n, z / n];
 }
 
+export interface CameraConfig {
+  pixelWidth?: number;
+  pixelHeight?: number;
+  frameHeight?: number;
+  frameWidth?: number;
+  frameCenter?: number[];
+  background?: ColorLike;
+  [key: string]: any;
+}
+
 export class Camera {
-  constructor(config = {}) {
+  pixelWidth: number;
+  pixelHeight: number;
+  frameHeight: number;
+  frameWidth: number;
+  frameCenter: number[];
+  background: ColorLike;
+  // Members provided by 3D camera subclasses. `declare` so no field initializer
+  // is emitted — otherwise (ES2022 class fields) this would shadow the
+  // subclass's prototype method with `undefined`.
+  // projectionDepth is provided by 3D camera subclasses as a prototype method.
+  // It is declared via interface-merging below (as a method signature) rather
+  // than a class property, so subclasses can override it with a method without a
+  // member-kind mismatch (TS2425), and nothing is emitted to shadow it under
+  // Node type-stripping.
+  declare disableZBuffer?: boolean;
+  declare flatShading?: boolean;
+  declare focalDistance?: number;
+
+  constructor(config: CameraConfig = {}) {
     this.pixelWidth = config.pixelWidth ?? 1920;
     this.pixelHeight = config.pixelHeight ?? 1080;
     this.frameHeight = config.frameHeight ?? 8;
@@ -33,7 +62,7 @@ export class Camera {
   }
 
   // World coordinates -> pixel coordinates (y is flipped: world y-up).
-  toPixel(p) {
+  toPixel(p: number[]): [number, number] {
     const cx = p[0] - this.frameCenter[0];
     const cy = p[1] - this.frameCenter[1];
     return [
@@ -43,26 +72,37 @@ export class Camera {
   }
 
   // Convert a manim stroke width (roughly px at 1080p) to this resolution.
-  strokeScale() {
+  strokeScale(): number {
     return this.pixelHeight / 1080;
   }
 }
 
+// Declaration-merge an optional projectionDepth *method* onto Camera. Declaring
+// it as a method (rather than a class property) lets 3D subclasses override it
+// with a prototype method without a member-kind mismatch (TS2425).
+export interface Camera {
+  projectionDepth?(p: number[]): number;
+}
+
 export class CanvasRenderer {
-  constructor(ctx, camera) {
+  ctx: Ctx2D;
+  camera: Camera;
+  _zb?: ZBuffer;
+
+  constructor(ctx: Ctx2D, camera: Camera) {
     this.ctx = ctx;
     this.camera = camera;
   }
 
-  clear() {
+  clear(): void {
     const { ctx, camera } = this;
     ctx.save();
-    ctx.fillStyle = camera.background;
+    ctx.fillStyle = camera.background as string;
     ctx.fillRect(0, 0, camera.pixelWidth, camera.pixelHeight);
     ctx.restore();
   }
 
-  renderScene(mobjects) {
+  renderScene(mobjects: any[]): void {
     // With a 3D camera, use the depth-buffered rasterizer so interpenetrating
     // surfaces resolve per pixel (painter sorting can't). 2D uses vector fills.
     if (typeof this.camera.projectionDepth === "function" && !this.camera.disableZBuffer) {
@@ -74,7 +114,7 @@ export class CanvasRenderer {
   }
 
   // --- 3D depth-buffered path --------------------------------------------
-  renderScene3D(mobjects) {
+  renderScene3D(mobjects: any[]): void {
     const { ctx, camera } = this;
     if (!this._zb) this._zb = new ZBuffer(camera.pixelWidth, camera.pixelHeight);
     this._zb.resize(camera.pixelWidth, camera.pixelHeight);
@@ -82,8 +122,8 @@ export class CanvasRenderer {
     this._zb.clear(bg[0], bg[1], bg[2]);
 
     // Collect the drawable family; text and images are deferred to an overlay.
-    const overlay = [];
-    const draw = (m) => {
+    const overlay: any[] = [];
+    const draw = (m: any) => {
       if (m.points && m.points.length) {
         if (m._isText || m._isImage) overlay.push(m);
         else this._rasterMobject(m);
@@ -96,15 +136,15 @@ export class CanvasRenderer {
     for (const m of overlay) m._isImage ? this.drawImage(m) : this.drawText(m);
   }
 
-  _projectVertex(p) {
+  _projectVertex(p: number[]): { x: number; y: number; z: number; r?: number; g?: number; b?: number } {
     const [x, y] = this.camera.toPixel(p);
-    return { x, y, z: this.camera.projectionDepth(p) };
+    return { x, y, z: this.camera.projectionDepth!(p) };
   }
 
   // Flatten a VMobject's subpaths into world-space polygon loops.
-  _flatten(mob) {
+  _flatten(mob: any): number[][][] {
     const seg = mob._straightPath ? 1 : 6;
-    const loops = [];
+    const loops: number[][][] = [];
     for (const sp of mob.getSubpaths()) {
       const nc = Math.floor((sp.length - 1) / 3);
       if (nc < 1) continue;
@@ -118,8 +158,8 @@ export class CanvasRenderer {
     return loops;
   }
 
-  _rasterMobject(mob) {
-    const zb = this._zb;
+  _rasterMobject(mob: any): void {
+    const zb = this._zb!;
     const opacity = mob.opacity ?? 1;
     const loops = this._flatten(mob);
 
@@ -168,16 +208,16 @@ export class CanvasRenderer {
     }
   }
 
-  renderMobjects(mobjects) {
+  renderMobjects(mobjects: any[]): void {
     // Draw in z-index order, stable for equal z. With a 3D camera, break ties by
     // painter's depth (far faces first) so surfaces self-occlude correctly.
     const camera3d = typeof this.camera.projectionDepth === "function" ? this.camera : null;
-    const flat = [];
+    const flat: Array<{ mob: any; z: number; depth: number; seq: number }> = [];
     let seq = 0;
-    const collect = (m, inheritedZ) => {
+    const collect = (m: any, inheritedZ: number) => {
       const z = m.zIndex ?? inheritedZ;
       if (m.points && m.points.length) {
-        const depth = camera3d ? camera3d.projectionDepth(centroid(m.points)) : 0;
+        const depth = camera3d ? camera3d.projectionDepth!(centroid(m.points)) : 0;
         flat.push({ mob: m, z, depth, seq: seq++ });
       }
       for (const s of m.submobjects) collect(s, z);
@@ -194,7 +234,7 @@ export class CanvasRenderer {
 
   // Draw a raster ImageMobject into the pixel bounding box of its projected
   // corners (axis-aligned; the common 2D case is exact, 3D is an approximation).
-  drawImage(mob) {
+  drawImage(mob: any): void {
     if (!mob.image) return;
     const { ctx, camera } = this;
     let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
@@ -211,7 +251,7 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  drawText(mob) {
+  drawText(mob: any): void {
     const { ctx, camera } = this;
     const alpha = (mob.fillOpacity ?? 1) * (mob.opacity ?? 1);
     if (alpha <= 0) return;
@@ -252,7 +292,7 @@ export class CanvasRenderer {
 
   // Trace a VMobject's subpaths into the current path, honoring strokeEnd for
   // progressive drawing (Create/Write).
-  tracePath(mob, proportion = 1) {
+  tracePath(mob: any, proportion = 1): void {
     const { ctx, camera } = this;
     const subpaths = mob.getSubpaths();
     const totalCurves = subpaths.reduce((n, sp) => n + Math.max(0, Math.floor((sp.length - 1) / 3)), 0);
@@ -281,7 +321,7 @@ export class CanvasRenderer {
     }
   }
 
-  drawVMobject(mob) {
+  drawVMobject(mob: any): void {
     const { ctx, camera } = this;
     if (mob.points.length === 0) return;
 

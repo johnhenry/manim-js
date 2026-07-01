@@ -3,9 +3,10 @@
 // indices 0, 3, 6, ...; the two control points sit between consecutive anchors.
 
 import { lerp } from "./vector.ts";
+import type { Vec3 } from "../types.ts";
 
 // Evaluate a cubic bezier at parameter t in [0, 1]. p0,p3 anchors; p1,p2 controls.
-export function bezier(p0, p1, p2, p3, t) {
+export function bezier(p0: number[], p1: number[], p2: number[], p3: number[], t: number): Vec3 {
   const mt = 1 - t;
   const a = mt * mt * mt;
   const b = 3 * mt * mt * t;
@@ -21,17 +22,17 @@ export function bezier(p0, p1, p2, p3, t) {
 // Approximate a quarter/section of a circular arc with cubic beziers. Returns
 // the control points needed to draw an arc of `angle` radians. Uses the
 // standard k = 4/3 * tan(theta/4) handle-length approximation per sub-arc.
-export function arcBezierPoints(radius, startAngle, angle, center = [0, 0, 0]) {
+export function arcBezierPoints(radius: number, startAngle: number, angle: number, center: number[] = [0, 0, 0]): Vec3[] {
   const nCurves = Math.max(1, Math.ceil(Math.abs(angle) / (Math.PI / 2)));
   const dAngle = angle / nCurves;
   const k = (4 / 3) * Math.tan(dAngle / 4);
-  const points = [];
-  const onCircle = (a) => [
+  const points: Vec3[] = [];
+  const onCircle = (a: number): Vec3 => [
     center[0] + radius * Math.cos(a),
     center[1] + radius * Math.sin(a),
     center[2],
   ];
-  const tangent = (a) => [-Math.sin(a), Math.cos(a), 0];
+  const tangent = (a: number): Vec3 => [-Math.sin(a), Math.cos(a), 0];
 
   let a0 = startAngle;
   points.push(onCircle(a0));
@@ -41,12 +42,12 @@ export function arcBezierPoints(radius, startAngle, angle, center = [0, 0, 0]) {
     const P3 = onCircle(a1);
     const t0 = tangent(a0);
     const t1 = tangent(a1);
-    const c1 = [
+    const c1: Vec3 = [
       P0[0] + k * radius * t0[0],
       P0[1] + k * radius * t0[1],
       P0[2],
     ];
-    const c2 = [
+    const c2: Vec3 = [
       P3[0] - k * radius * t1[0],
       P3[1] - k * radius * t1[1],
       P3[2],
@@ -59,14 +60,14 @@ export function arcBezierPoints(radius, startAngle, angle, center = [0, 0, 0]) {
 
 // Given a straight segment from a to b, produce the two interior control points
 // that make a cubic bezier trace a straight line (controls at the 1/3 marks).
-export function straightControlPoints(a, b) {
+export function straightControlPoints(a: number[], b: number[]): [Vec3, Vec3] {
   return [lerp(a, b, 1 / 3), lerp(a, b, 2 / 3)];
 }
 
 // Partial bezier: the sub-curve of [p0..p3] over parameter range [t0, t1].
 // Used by Create/Write to draw a curve progressively (de Casteljau split).
-export function partialBezier(p0, p1, p2, p3, t0, t1) {
-  const split = (a, b, c, d, t) => {
+export function partialBezier(p0: number[], p1: number[], p2: number[], p3: number[], t0: number, t1: number): Vec3[] {
+  const split = (a: number[], b: number[], c: number[], d: number[], t: number) => {
     const ab = lerp(a, b, t);
     const bc = lerp(b, c, t);
     const cd = lerp(c, d, t);

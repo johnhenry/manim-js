@@ -1,6 +1,7 @@
 // Node backend: render a Scene to an MP4 (or frames) using @napi-rs/canvas and
 // ffmpeg. This is the "runs everywhere manim runs" path.
 
+/// <reference types="node" />
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -11,10 +12,29 @@ import { QUALITIES } from "./index.ts";
 
 export * from "./index.ts";
 
-async function loadCanvas() {
+// Options accepted by render(). All fields are optional; sensible defaults are
+// applied inside the function.
+export interface RenderOptions {
+  output?: string;
+  quality?: string;
+  background?: string;
+  format?: string; // "mp4" | "png-sequence" | "webm" | "gif"
+  fps?: number;
+  pixelWidth?: number;
+  pixelHeight?: number;
+  camera?: any;
+  verbose?: boolean;
+  vectorFont?: string;
+  fonts?: Array<{ path: string; name: string }>;
+  [key: string]: any;
+}
+
+// @napi-rs/canvas is dynamically imported and may lack precise types here; treat
+// its surface as `any`.
+async function loadCanvas(): Promise<any> {
   try {
     return await import("@napi-rs/canvas");
-  } catch (e) {
+  } catch (e: any) {
     throw new Error(
       "@napi-rs/canvas is required for Node rendering. Install it with:\n" +
       "  npm install @napi-rs/canvas\n" +
@@ -26,7 +46,7 @@ async function loadCanvas() {
 // Render a Scene subclass (or a construct function) to a video file.
 //   await render(MyScene, { output: "out.mp4", quality: "medium" })
 //   await render(async (scene) => { ... }, { output: "out.mp4" })
-export async function render(sceneOrConstruct, options = {}) {
+export async function render(sceneOrConstruct: any, options: RenderOptions = {}) {
   const {
     output = "output.mp4",
     quality = "medium",
@@ -102,8 +122,8 @@ export async function render(sceneOrConstruct, options = {}) {
 
   if (ffmpeg) {
     ffmpeg.stdin.end();
-    await new Promise((res, rej) => {
-      ffmpeg.on("close", (code) => (code === 0 ? res() : rej(new Error("ffmpeg exited " + code))));
+    await new Promise<void>((res, rej) => {
+      ffmpeg.on("close", (code: number) => (code === 0 ? res() : rej(new Error("ffmpeg exited " + code))));
       ffmpeg.on("error", rej);
     });
   }
@@ -121,11 +141,11 @@ export async function render(sceneOrConstruct, options = {}) {
 
 // Overlay scheduled audio clips onto a rendered video with ffmpeg (delay each to
 // its start time, apply gain, mix, and remux keeping the video stream as-is).
-async function muxAudio(videoPath, sounds, format, verbose) {
+async function muxAudio(videoPath: string, sounds: any[], format: string, verbose: boolean) {
   const inputs = ["-i", videoPath];
-  const filters = [];
-  const labels = [];
-  sounds.forEach((s, i) => {
+  const filters: string[] = [];
+  const labels: string[] = [];
+  sounds.forEach((s: any, i: number) => {
     inputs.push("-i", resolve(s.file));
     const d = Math.max(0, Math.round((s.time ?? 0) * 1000));
     filters.push(`[${i + 1}:a]adelay=${d}|${d},volume=${s.gain ?? 1}[a${i}]`);
@@ -144,34 +164,34 @@ async function muxAudio(videoPath, sounds, format, verbose) {
     "-map", "0:v", "-map", audioLabel,
     "-c:v", "copy", "-c:a", audioCodec, tmp,
   ];
-  await new Promise((res, rej) => {
+  await new Promise<void>((res, rej) => {
     const ff = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", verbose ? "inherit" : "ignore"] });
-    ff.on("close", (code) => (code === 0 ? res() : rej(new Error("ffmpeg audio mux exited " + code))));
+    ff.on("close", (code: number) => (code === 0 ? res() : rej(new Error("ffmpeg audio mux exited " + code))));
     ff.on("error", rej);
   });
   renameSync(tmp, videoPath);
 }
 
 // Load a bitmap for ImageMobject (Node: via @napi-rs/canvas).
-export async function loadImage(src) {
+export async function loadImage(src: any) {
   const { loadImage: load } = await loadCanvas();
   return load(src);
 }
 
 // Convenience: load an image file straight into an ImageMobject.
-export async function imageMobject(src, config = {}) {
+export async function imageMobject(src: any, config: any = {}) {
   const { ImageMobject } = await import("./mobject/image_mobject.ts");
   return new ImageMobject(await loadImage(src), config);
 }
 
 // Load an SVG file into an SVGMobject (Node: read from disk).
-export async function loadSVG(path, config = {}) {
+export async function loadSVG(path: string, config: any = {}) {
   const { readFileSync } = await import("node:fs");
   const { SVGMobject } = await import("./mobject/svg_mobject.ts");
   return new SVGMobject(readFileSync(resolve(path), "utf8"), config);
 }
 
-function startFfmpeg({ fps, pixelWidth, pixelHeight, outPath, format, verbose }) {
+function startFfmpeg({ fps, pixelWidth, pixelHeight, outPath, format, verbose }: any) {
   const args = [
     "-y",
     "-f", "image2pipe",
@@ -191,8 +211,8 @@ function startFfmpeg({ fps, pixelWidth, pixelHeight, outPath, format, verbose })
   return ff;
 }
 
-function writeToStream(stream, buf) {
-  return new Promise((res) => {
+function writeToStream(stream: any, buf: any) {
+  return new Promise<void>((res) => {
     if (!stream.write(buf)) stream.once("drain", res);
     else res();
   });

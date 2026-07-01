@@ -5,17 +5,41 @@
 // uses). ThreeDScene adds camera-orientation animation and ambient rotation.
 
 import { Camera } from "../renderer/CanvasRenderer.ts";
+import type { CameraConfig } from "../renderer/CanvasRenderer.ts";
 import { Scene } from "./Scene.ts";
+import type { SceneConfig } from "./Scene.ts";
 import { VGroup } from "../mobject/VMobject.ts";
 import { Line } from "../mobject/geometry.ts";
 import * as V from "../core/math/vector.ts";
 import { smooth } from "../animation/rate_functions.ts";
+import type { RateFunc } from "../core/types.ts";
 
-const Z_AXIS = [0, 0, 1];
-const X_AXIS = [1, 0, 0];
+const Z_AXIS: number[] = [0, 0, 1];
+const X_AXIS: number[] = [1, 0, 0];
+
+export interface ThreeDCameraConfig extends CameraConfig {
+  phi?: number;
+  theta?: number;
+  focalDistance?: number;
+  zoom?: number;
+}
+
+/** Orientation options accepted by setOrientation / moveCamera. */
+export interface CameraOrientation {
+  phi?: number;
+  theta?: number;
+  zoom?: number;
+  focalDistance?: number;
+}
 
 export class ThreeDCamera extends Camera {
-  constructor(config = {}) {
+  phi: number;
+  theta: number;
+  // focalDistance is declared on the base Camera; give it a concrete type here.
+  declare focalDistance: number;
+  zoom: number;
+
+  constructor(config: ThreeDCameraConfig = {}) {
     super(config);
     // phi: polar angle measured from the +z axis (0 = looking straight down the
     // z-axis onto the xy-plane). theta: azimuthal angle; -90deg keeps the xy-plane
@@ -31,7 +55,7 @@ export class ThreeDCamera extends Camera {
   // (theta = -90deg, phi = 0) leaves the xy-plane upright: z-rotation by
   // -(theta + 90deg) then x-rotation by -phi. Returns [cx, cy, cz] where cz is
   // depth toward the viewer (larger cz = nearer the camera).
-  toCameraSpace(p) {
+  toCameraSpace(p: number[]): number[] {
     const rel = [
       p[0] - this.frameCenter[0],
       p[1] - this.frameCenter[1],
@@ -42,13 +66,13 @@ export class ThreeDCamera extends Camera {
   }
 
   // Camera-space depth toward the viewer (for painter sorting).
-  projectionDepth(p) {
+  projectionDepth(p: number[]): number {
     return this.toCameraSpace(p)[2];
   }
 
   // World [x,y,z] -> pixel [px, py]. Weak-perspective divide by focal distance,
   // then the same frame->pixel mapping (with y-flip) as the base Camera.
-  toPixel(p) {
+  toPixel(p: number[]): [number, number] {
     const [cx, cy, cz] = this.toCameraSpace(p);
     const denom = this.focalDistance - cz;
     const factor = (this.focalDistance / (Math.abs(denom) < 1e-3 ? 1e-3 * Math.sign(denom || 1) : denom)) * this.zoom;
@@ -60,7 +84,7 @@ export class ThreeDCamera extends Camera {
     ];
   }
 
-  setOrientation({ phi, theta, zoom, focalDistance } = {}) {
+  setOrientation({ phi, theta, zoom, focalDistance }: CameraOrientation = {}): this {
     if (phi != null) this.phi = phi;
     if (theta != null) this.theta = theta;
     if (zoom != null) this.zoom = zoom;
@@ -70,10 +94,16 @@ export class ThreeDCamera extends Camera {
 }
 
 export class ThreeDScene extends Scene {
-  constructor(config = {}) {
+  declare camera: ThreeDCamera;
+  _ambientOn: boolean;
+  _ambientRate: number;
+  _ambientField: string;
+  _depthSort: boolean;
+
+  constructor(config: SceneConfig = {}) {
     super(config);
     if (!(this.camera instanceof ThreeDCamera)) {
-      const base = this.camera ?? {};
+      const base: any = this.camera ?? {};
       this.camera = new ThreeDCamera({
         pixelWidth: base.pixelWidth,
         pixelHeight: base.pixelHeight,
@@ -89,13 +119,16 @@ export class ThreeDScene extends Scene {
     this._depthSort = false;
   }
 
-  setCameraOrientation(opts = {}) {
+  setCameraOrientation(opts: CameraOrientation = {}): this {
     this.camera.setOrientation(opts);
     return this;
   }
 
   // Smoothly tween phi/theta/zoom/focalDistance over runTime seconds.
-  async moveCamera({ phi, theta, zoom, focalDistance } = {}, { runTime = 3, rateFunc = smooth } = {}) {
+  async moveCamera(
+    { phi, theta, zoom, focalDistance }: CameraOrientation = {},
+    { runTime = 3, rateFunc = smooth }: { runTime?: number; rateFunc?: RateFunc } = {},
+  ): Promise<this> {
     const cam = this.camera;
     const start = { phi: cam.phi, theta: cam.theta, zoom: cam.zoom, focalDistance: cam.focalDistance };
     const target = {
@@ -119,31 +152,31 @@ export class ThreeDScene extends Scene {
     return this;
   }
 
-  beginAmbientCameraRotation({ rate = 0.02, about = "theta" } = {}) {
+  beginAmbientCameraRotation({ rate = 0.02, about = "theta" }: { rate?: number; about?: string } = {}): this {
     this._ambientOn = true;
     this._ambientRate = rate;
     this._ambientField = about;
     return this;
   }
 
-  stopAmbientCameraRotation() {
+  stopAmbientCameraRotation(): this {
     this._ambientOn = false;
     return this;
   }
 
-  updateMobjects(dt) {
-    if (this._ambientOn) this.camera[this._ambientField] += this._ambientRate * dt;
+  updateMobjects(dt: number): void {
+    if (this._ambientOn) (this.camera as any)[this._ambientField] += this._ambientRate * dt;
     super.updateMobjects(dt);
   }
 
   // Optional painter's-depth sorting: order top-level mobjects so nearer ones
   // draw last. Robust to mobjects without points.
-  enableDepthSorting(on = true) {
+  enableDepthSorting(on = true): this {
     this._depthSort = on;
     return this;
   }
 
-  async emitFrame() {
+  async emitFrame(): Promise<void> {
     if (this._depthSort) {
       for (const m of this.mobjects) {
         try {
@@ -157,8 +190,19 @@ export class ThreeDScene extends Scene {
 
 // Three number-line-style axes (x, y, z) crossing the origin. The z-axis uses
 // points with a real z-component; the camera projects everything.
+export interface ThreeDAxesConfig {
+  xRange?: number[];
+  yRange?: number[];
+  zRange?: number[];
+  axisColors?: string[];
+}
+
 export class ThreeDAxes extends VGroup {
-  constructor(config = {}) {
+  xAxis: Line;
+  yAxis: Line;
+  zAxis: Line;
+
+  constructor(config: ThreeDAxesConfig = {}) {
     super();
     const xr = config.xRange ?? [-4, 4, 1];
     const yr = config.yRange ?? [-4, 4, 1];

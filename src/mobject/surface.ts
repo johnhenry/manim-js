@@ -4,8 +4,10 @@
 // approach manim's Cairo renderer uses. No GPU/WebGL.
 
 import { VMobject, VGroup } from "./VMobject.ts";
+import type { VMobjectConfig } from "./VMobject.ts";
 import { Color } from "../core/color.ts";
 import * as V from "../core/math/vector.ts";
+import type { ColorLike, SurfaceFunc } from "../core/types.ts";
 
 const DEFAULT_LIGHT = V.normalize([-1, -1, 1]); // upper-left, toward viewer
 const AMBIENT = 0.35;
@@ -13,7 +15,11 @@ const DIFFUSE = 0.65;
 
 // A single quad face carrying its unshaded base color.
 class Face extends VMobject {
-  constructor(corners, baseColor, config) {
+  baseColor: Color;
+  _uv?: number[][];
+  _vertexColors?: number[][];
+
+  constructor(corners: number[][], baseColor: ColorLike, config: VMobjectConfig) {
     super(config);
     this.baseColor = Color.parse(baseColor);
     this.setPointsAsCorners([...corners, corners[0]]);
@@ -25,9 +31,42 @@ class Face extends VMobject {
   }
 }
 
+export interface SurfaceConfig extends VMobjectConfig {
+  uRange?: [number, number];
+  vRange?: [number, number];
+  resolution?: number | [number, number];
+  checkerboardColors?: string[] | null;
+  checkerboard?: string[] | null;
+  colorFunc?: ((u: number, v: number, point: number[]) => ColorLike) | null;
+  lightDirection?: number[];
+  shade?: boolean;
+  smooth?: boolean;
+  point?: number[];
+  radius?: number;
+  majorRadius?: number;
+  minorRadius?: number;
+  baseRadius?: number;
+  width?: number;
+  height?: number;
+  depth?: number;
+  sideLength?: number;
+}
+
 export class Surface extends VGroup {
+  func: SurfaceFunc;
+  uRange: [number, number];
+  vRange: [number, number];
+  resolution: [number, number];
+  checkerboard: string[] | null;
+  baseFill: ColorLike;
+  colorFunc: ((u: number, v: number, point: number[]) => ColorLike) | null;
+  lightDirection: number[];
+  shade: boolean;
+  smooth: boolean;
+  _faceConfig: VMobjectConfig;
+
   // func: (u, v) -> [x, y, z]
-  constructor(func, config = {}) {
+  constructor(func: SurfaceFunc, config: SurfaceConfig = {}) {
     super();
     this.func = func;
     this.uRange = config.uRange ?? [0, 1];
@@ -63,7 +102,7 @@ export class Surface extends VGroup {
   }
 
   // Analytic-ish surface normal at (u, v) via numerical partial derivatives.
-  _normalAt(u, v) {
+  _normalAt(u: number, v: number): number[] {
     const e = 1e-4;
     const du = V.sub(this.func(u + e, v), this.func(u - e, v));
     const dv = V.sub(this.func(u, v + e), this.func(u, v - e));
@@ -72,12 +111,12 @@ export class Surface extends VGroup {
     return len < 1e-9 ? [0, 0, 1] : V.scale(n, 1 / len);
   }
 
-  _build() {
+  _build(): void {
     const [nu, nv] = this.resolution;
     const [u0, u1] = this.uRange;
     const [v0, v1] = this.vRange;
-    const uAt = (i) => u0 + (u1 - u0) * (i / nu);
-    const vAt = (j) => v0 + (v1 - v0) * (j / nv);
+    const uAt = (i: number) => u0 + (u1 - u0) * (i / nu);
+    const vAt = (j: number) => v0 + (v1 - v0) * (j / nv);
     const defaultChecker = this.checkerboard ?? ["#29ABCA", "#1C758A"];
 
     for (let i = 0; i < nu; i++) {
@@ -104,10 +143,10 @@ export class Surface extends VGroup {
   // Per-vertex (Gouraud) shading: light each corner by its smooth surface normal
   // and hand the renderer per-vertex colors so lighting interpolates across the
   // face. Shared grid vertices get the same normal -> seamless smooth surface.
-  applySmoothShading(lightDir = this.lightDirection) {
+  applySmoothShading(lightDir: number[] = this.lightDirection): this {
     const light = V.normalize(lightDir);
     const center = this.getCenter();
-    for (const face of this.submobjects) {
+    for (const face of this.submobjects as Face[]) {
       if (!face._uv) continue;
       const base = face.baseColor;
       const colors = face._uv.map(([u, v], k) => {
@@ -126,10 +165,10 @@ export class Surface extends VGroup {
 
   // Re-shade every face using its outward normal vs the light direction. Called
   // at build; call again after deforming the surface to keep lighting correct.
-  applyShading(lightDir = this.lightDirection) {
+  applyShading(lightDir: number[] = this.lightDirection): this {
     const light = V.normalize(lightDir);
     const center = this.getCenter();
-    for (const face of this.submobjects) {
+    for (const face of this.submobjects as Face[]) {
       const p = face.points;
       if (p.length < 7) continue;
       const a = p[0], b = p[3], c = p[6]; // three anchors of the quad
@@ -144,8 +183,8 @@ export class Surface extends VGroup {
     return this;
   }
 
-  setFillOpacity(o) {
-    for (const f of this.submobjects) f.fillOpacity = o;
+  setFillOpacity(o: number): this {
+    for (const f of this.submobjects as Face[]) f.fillOpacity = o;
     this.fillOpacity = o;
     return this;
   }
@@ -154,9 +193,11 @@ export class Surface extends VGroup {
 export const ParametricSurface = Surface;
 
 export class Sphere extends Surface {
-  constructor(config = {}) {
+  radius: number;
+
+  constructor(config: SurfaceConfig = {}) {
     const r = config.radius ?? 1;
-    const func = (u, v) => [
+    const func: SurfaceFunc = (u, v) => [
       r * Math.sin(u) * Math.cos(v),
       r * Math.sin(u) * Math.sin(v),
       r * Math.cos(u),
@@ -173,10 +214,10 @@ export class Sphere extends Surface {
 }
 
 export class Torus extends Surface {
-  constructor(config = {}) {
+  constructor(config: SurfaceConfig = {}) {
     const R = config.majorRadius ?? 3; // manim default major/minor = 3/1
     const r = config.minorRadius ?? 1;
-    const func = (u, v) => [
+    const func: SurfaceFunc = (u, v) => [
       (R + r * Math.cos(v)) * Math.cos(u),
       (R + r * Math.cos(v)) * Math.sin(u),
       r * Math.sin(v),
@@ -192,10 +233,10 @@ export class Torus extends Surface {
 }
 
 export class Cylinder extends Surface {
-  constructor(config = {}) {
+  constructor(config: SurfaceConfig = {}) {
     const r = config.radius ?? 1;
     const h = config.height ?? 2;
-    const func = (u, v) => [r * Math.cos(u), r * Math.sin(u), v];
+    const func: SurfaceFunc = (u, v) => [r * Math.cos(u), r * Math.sin(u), v];
     super(func, {
       uRange: [0, 2 * Math.PI],
       vRange: [-h / 2, h / 2],
@@ -207,11 +248,11 @@ export class Cylinder extends Surface {
 }
 
 export class Cone extends Surface {
-  constructor(config = {}) {
+  constructor(config: SurfaceConfig = {}) {
     const r = config.baseRadius ?? 1;
     const h = config.height ?? 1; // manim Cone default height = 1
     // v in [0,1] from apex (z=h) to base (z=0).
-    const func = (u, v) => [r * v * Math.cos(u), r * v * Math.sin(u), h * (1 - v)];
+    const func: SurfaceFunc = (u, v) => [r * v * Math.cos(u), r * v * Math.sin(u), h * (1 - v)];
     super(func, {
       uRange: [0, 2 * Math.PI],
       vRange: [0, 1],
@@ -224,21 +265,21 @@ export class Cone extends Surface {
 
 // Axis-aligned box built from 6 flat quad faces (each shaded by its normal).
 export class Box extends VGroup {
-  constructor(config = {}) {
+  constructor(config: SurfaceConfig = {}) {
     super();
     const w = (config.width ?? 2) / 2;
     const h = (config.height ?? 2) / 2;
     const d = (config.depth ?? 2) / 2;
     const color = config.fillColor ?? config.color ?? "#58C4DD";
     const light = config.lightDirection ? V.normalize(config.lightDirection) : DEFAULT_LIGHT;
-    const faceCfg = {
+    const faceCfg: VMobjectConfig = {
       // manim Cube/Prism defaults: fill_opacity 0.75, stroke_width 0.
       fillOpacity: config.fillOpacity ?? 0.75,
       strokeColor: config.strokeColor ?? "#00000066",
       strokeWidth: config.strokeWidth ?? 0,
     };
     // Corner helper.
-    const c = (sx, sy, sz) => [sx * w, sy * h, sz * d];
+    const c = (sx: number, sy: number, sz: number): number[] => [sx * w, sy * h, sz * d];
     // Each face: 4 corners in CCW order (outward normal) + outward normal.
     const faces = [
       { pts: [c(1, -1, -1), c(1, 1, -1), c(1, 1, 1), c(1, -1, 1)], n: [1, 0, 0] },
@@ -261,7 +302,7 @@ export class Box extends VGroup {
 }
 
 export class Cube extends Box {
-  constructor(config = {}) {
+  constructor(config: SurfaceConfig = {}) {
     const s = config.sideLength ?? 2;
     super({ ...config, width: s, height: s, depth: s });
   }

@@ -4,11 +4,39 @@
 import * as V from "../core/math/vector.ts";
 import { Color } from "../core/color.ts";
 import { makeAnimateBuilder } from "../animation/composition.ts";
+import type { Vec3, ColorLike } from "../core/types.ts";
 
 let _idCounter = 0;
 
+/** Base configuration accepted by every Mobject constructor. */
+export interface MobjectConfig {
+  name?: string;
+  color?: ColorLike;
+  opacity?: number;
+  zIndex?: number;
+  [key: string]: any;
+}
+
+/** An updater callback invoked each frame with the mobject and a time delta. */
+export type Updater = (mob: Mobject, dt: number) => void;
+
+/** An axis-aligned bounding box in world space. */
+export interface BoundingBox {
+  min: number[];
+  max: number[];
+}
+
 export class Mobject {
-  constructor(config = {}) {
+  id: number;
+  points: number[][];
+  submobjects: Mobject[];
+  name: string;
+  color: Color;
+  opacity: number;
+  zIndex: number;
+  updaters: Updater[];
+
+  constructor(config: MobjectConfig = {}) {
     this.id = _idCounter++;
     this.points = []; // array of [x,y,z]
     this.submobjects = [];
@@ -20,49 +48,49 @@ export class Mobject {
   }
 
   // --- tree ---------------------------------------------------------------
-  add(...mobs) {
+  add(...mobs: (Mobject | Mobject[])[]): this {
     for (const m of mobs.flat()) {
       if (m && !this.submobjects.includes(m)) this.submobjects.push(m);
     }
     return this;
   }
 
-  remove(...mobs) {
+  remove(...mobs: (Mobject | Mobject[])[]): this {
     const set = new Set(mobs.flat());
     this.submobjects = this.submobjects.filter((m) => !set.has(m));
     return this;
   }
 
   // All mobjects in this subtree that actually carry points (family members).
-  getFamily() {
-    const out = [this];
+  getFamily(): Mobject[] {
+    const out: Mobject[] = [this];
     for (const s of this.submobjects) out.push(...s.getFamily());
     return out;
   }
 
   // Every point across the whole family — the basis for transforms & bounds.
-  *allPoints() {
+  *allPoints(): Generator<number[]> {
     for (const m of this.getFamily()) {
       for (const p of m.points) yield p;
     }
   }
 
   // --- transforms ---------------------------------------------------------
-  applyToPoints(fn) {
+  applyToPoints(fn: (p: number[]) => number[]): this {
     for (const m of this.getFamily()) {
       for (let i = 0; i < m.points.length; i++) m.points[i] = fn(m.points[i]);
     }
     return this;
   }
 
-  shift(...vectors) {
+  shift(...vectors: number[][]): this {
     const total = vectors
       .filter((v) => Array.isArray(v))
-      .reduce((acc, v) => V.add(acc, v), [0, 0, 0]);
+      .reduce((acc, v) => V.add(acc, v), [0, 0, 0] as number[]);
     return this.applyToPoints((p) => V.add(p, total));
   }
 
-  moveTo(pointOrMobject, aboutEdge = V.ORIGIN) {
+  moveTo(pointOrMobject: Mobject | number[], aboutEdge: number[] = V.ORIGIN): this {
     const target = pointOrMobject instanceof Mobject
       ? pointOrMobject.getCenter()
       : pointOrMobject;
@@ -70,12 +98,12 @@ export class Mobject {
     return this.shift(V.sub(target, ref));
   }
 
-  scale(factor, { aboutPoint } = {}) {
+  scale(factor: number, { aboutPoint }: { aboutPoint?: number[] } = {}): this {
     const center = aboutPoint ?? this.getCenter();
     return this.applyToPoints((p) => V.add(center, V.scale(V.sub(p, center), factor)));
   }
 
-  stretch(factor, dim, { aboutPoint } = {}) {
+  stretch(factor: number, dim: number, { aboutPoint }: { aboutPoint?: number[] } = {}): this {
     const center = aboutPoint ?? this.getCenter();
     return this.applyToPoints((p) => {
       const q = V.clone(p);
@@ -84,18 +112,18 @@ export class Mobject {
     });
   }
 
-  rotate(angle, { axis = V.OUT, aboutPoint } = {}) {
+  rotate(angle: number, { axis = V.OUT, aboutPoint }: { axis?: number[]; aboutPoint?: number[] } = {}): this {
     const center = aboutPoint ?? this.getCenter();
     return this.applyToPoints((p) =>
       V.add(center, V.rotateVector(V.sub(p, center), angle, axis)));
   }
 
-  flip(axis = V.UP, opts = {}) {
+  flip(axis: number[] = V.UP, opts: { aboutPoint?: number[] } = {}): this {
     return this.rotate(Math.PI, { axis, ...opts });
   }
 
   // --- bounds -------------------------------------------------------------
-  getBoundingBox() {
+  getBoundingBox(): BoundingBox {
     let min = [Infinity, Infinity, Infinity];
     let max = [-Infinity, -Infinity, -Infinity];
     let any = false;
@@ -110,13 +138,13 @@ export class Mobject {
     return { min, max };
   }
 
-  getCenter() {
+  getCenter(): Vec3 {
     const { min, max } = this.getBoundingBox();
     return [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
   }
 
   // A point on the bounding box in the given direction (e.g. UP-edge, corner).
-  getBoundaryPoint(direction) {
+  getBoundaryPoint(direction: number[]): Vec3 {
     const { min, max } = this.getBoundingBox();
     const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
     return [
@@ -126,34 +154,34 @@ export class Mobject {
     ];
   }
 
-  getWidth() {
+  getWidth(): number {
     const { min, max } = this.getBoundingBox();
     return max[0] - min[0];
   }
 
-  getHeight() {
+  getHeight(): number {
     const { min, max } = this.getBoundingBox();
     return max[1] - min[1];
   }
 
-  getTop() { return this.getBoundaryPoint(V.UP); }
-  getBottom() { return this.getBoundaryPoint(V.DOWN); }
-  getLeft() { return this.getBoundaryPoint(V.LEFT); }
-  getRight() { return this.getBoundaryPoint(V.RIGHT); }
-  getCorner(dir) { return this.getBoundaryPoint(dir); }
+  getTop(): Vec3 { return this.getBoundaryPoint(V.UP); }
+  getBottom(): Vec3 { return this.getBoundaryPoint(V.DOWN); }
+  getLeft(): Vec3 { return this.getBoundaryPoint(V.LEFT); }
+  getRight(): Vec3 { return this.getBoundaryPoint(V.RIGHT); }
+  getCorner(dir: number[]): Vec3 { return this.getBoundaryPoint(dir); }
 
-  setWidth(w) {
+  setWidth(w: number): this {
     const cur = this.getWidth();
     return cur === 0 ? this : this.scale(w / cur);
   }
 
-  setHeight(h) {
+  setHeight(h: number): this {
     const cur = this.getHeight();
     return cur === 0 ? this : this.scale(h / cur);
   }
 
   // --- positioning helpers ------------------------------------------------
-  toEdge(edge, buff = 0.5, frame = { width: 14.222, height: 8 }) {
+  toEdge(edge: number[], buff = 0.5, frame: { width: number; height: number } = { width: 14.222, height: 8 }): this {
     const target = [
       edge[0] * (frame.width / 2 - buff),
       edge[1] * (frame.height / 2 - buff),
@@ -166,15 +194,15 @@ export class Mobject {
     return this.shift(delta);
   }
 
-  toCorner(corner, buff = 0.5, frame) {
+  toCorner(corner: number[], buff = 0.5, frame?: { width: number; height: number }): this {
     return this.toEdge(corner, buff, frame);
   }
 
-  center() {
+  center(): this {
     return this.shift(V.neg(this.getCenter()));
   }
 
-  nextTo(mobjectOrPoint, direction = V.RIGHT, buff = 0.25, aligned = null) {
+  nextTo(mobjectOrPoint: Mobject | number[], direction: number[] = V.RIGHT, buff = 0.25, aligned: any = null): this {
     const anchor = mobjectOrPoint instanceof Mobject
       ? mobjectOrPoint.getBoundaryPoint(direction)
       : mobjectOrPoint;
@@ -186,51 +214,51 @@ export class Mobject {
   }
 
   // --- style --------------------------------------------------------------
-  setColor(color) {
+  setColor(color: ColorLike): this {
     this.color = Color.parse(color);
     for (const m of this.submobjects) m.setColor(color);
     return this;
   }
 
-  setOpacity(o) {
+  setOpacity(o: number): this {
     this.opacity = o;
     for (const m of this.submobjects) m.setOpacity(o);
     return this;
   }
 
-  fade(darkness = 0.5) {
+  fade(darkness = 0.5): this {
     return this.setOpacity(this.opacity * (1 - darkness));
   }
 
   // Ergonomic animation builder: `scene.play(mob.animate.shift(RIGHT).scale(2))`.
-  get animate() {
+  get animate(): any {
     return makeAnimateBuilder(this);
   }
 
   // --- updaters (for continuous animation) --------------------------------
-  addUpdater(fn) {
+  addUpdater(fn: Updater): this {
     this.updaters.push(fn);
     return this;
   }
 
-  clearUpdaters() {
+  clearUpdaters(): this {
     this.updaters = [];
     for (const m of this.submobjects) m.clearUpdaters();
     return this;
   }
 
-  update(dt) {
+  update(dt: number): this {
     for (const fn of this.updaters) fn(this, dt);
     return this;
   }
 
-  hasUpdaters() {
+  hasUpdaters(): boolean {
     if (this.updaters.length) return true;
     return this.submobjects.some((m) => m.hasUpdaters());
   }
 
   // --- copy / interpolate -------------------------------------------------
-  copy() {
+  copy(): this {
     const c = Object.create(Object.getPrototypeOf(this));
     Object.assign(c, this);
     c.id = _idCounter++;
@@ -243,7 +271,7 @@ export class Mobject {
 
   // Blend this mobject's state from `start` toward `target` by alpha in [0,1].
   // Base class handles points, color and opacity; VMobject extends for fill.
-  interpolate(start, target, alpha) {
+  interpolate(start: Mobject, target: Mobject, alpha: number): this {
     const n = Math.min(this.points.length, start.points.length, target.points.length);
     for (let i = 0; i < n; i++) {
       this.points[i] = V.lerp(start.points[i], target.points[i], alpha);

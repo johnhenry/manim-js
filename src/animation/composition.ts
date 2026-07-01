@@ -2,13 +2,27 @@
 // ergonomic `.animate` builder that mirrors manim's `mob.animate.shift(...)`.
 
 import { Animation, Transform } from "./Animation.ts";
+import type { AnimationConfig } from "./Animation.ts";
 import { running, smooth, linear } from "./rate_functions.ts";
+import type { Mobject } from "../mobject/Mobject.ts";
 
 // Interpolate a scalar (used for timing math).
-const mix = (a, b, t) => a + (b - a) * t;
+const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+interface Timing {
+  anim: any;
+  start: number;
+  end: number;
+}
 
 export class AnimationGroup extends Animation {
-  constructor(animations, config = {}) {
+  animations: any[];
+  groupRunTime: number | null;
+  timings: Timing[];
+  maxEnd: number;
+  scaledTimings: Timing[];
+
+  constructor(animations: any[], config: AnimationConfig = {}) {
     // The group's own mobject is a stand-in; real work is delegated. manim's
     // AnimationGroup defaults to a linear group rate function.
     super(null, { ...config, rateFunc: config.rateFunc ?? linear });
@@ -21,7 +35,7 @@ export class AnimationGroup extends Animation {
     else this.runTime = this.groupRunTime;
   }
 
-  _buildTimings() {
+  _buildTimings(): void {
     // Mirror manim: next start = start + lagRatio * run_time.
     let curr = 0;
     let maxEnd = 0;
@@ -36,7 +50,7 @@ export class AnimationGroup extends Animation {
     this.maxEnd = maxEnd || 1;
   }
 
-  begin() {
+  begin(): this {
     this.started = true;
     for (const { anim } of this.timings) anim.begin();
     // Rescale timings into [0,1] against the group's total runTime.
@@ -50,7 +64,7 @@ export class AnimationGroup extends Animation {
     return this;
   }
 
-  interpolate(alpha) {
+  interpolate(alpha: number): void {
     // Apply the group's rate function, then dispatch to each child by its window.
     const t = this.rateFunc(Math.max(0, Math.min(1, alpha)));
     for (const { anim, start, end } of this.scaledTimings) {
@@ -60,36 +74,36 @@ export class AnimationGroup extends Animation {
     }
   }
 
-  finish() {
+  finish(): this {
     for (const { anim } of this.timings) anim.finish();
     this.finished = true;
     return this;
   }
 
-  getMobjectsToIntroduce() {
+  getMobjectsToIntroduce(): Mobject[] {
     return this.animations.flatMap((a) => a.getMobjectsToIntroduce());
   }
 
-  getMobjectsToRemove() {
+  getMobjectsToRemove(): Mobject[] {
     return this.animations.flatMap((a) => a.getMobjectsToRemove());
   }
 }
 
 export class LaggedStart extends AnimationGroup {
-  constructor(animations, config = {}) {
+  constructor(animations: any[], config: AnimationConfig = {}) {
     super(animations, { lagRatio: config.lagRatio ?? 0.05, ...config });
   }
 }
 
 export class Succession extends AnimationGroup {
-  constructor(animations, config = {}) {
+  constructor(animations: any[], config: AnimationConfig = {}) {
     super(animations, { lagRatio: 1, ...config });
   }
 }
 
 // Apply the same animation factory to many mobjects with a stagger.
 export class LaggedStartMap extends LaggedStart {
-  constructor(animFactory, mobjects, config = {}) {
+  constructor(animFactory: (m: any) => any, mobjects: any[], config: AnimationConfig = {}) {
     super(mobjects.map((m) => animFactory(m)), config);
   }
 }
@@ -97,9 +111,9 @@ export class LaggedStartMap extends LaggedStart {
 // --- the `.animate` builder ------------------------------------------------
 // Returns a chainable proxy; each method call mutates a copy of the mobject.
 // When handed to Scene.play it is converted to a Transform via build().
-export function makeAnimateBuilder(mob, config = {}) {
+export function makeAnimateBuilder(mob: any, config: AnimationConfig = {}): any {
   const target = mob.copy();
-  const state = {
+  const state: any = {
     _isAnimateBuilder: true,
     _mob: mob,
     _target: target,
@@ -108,12 +122,12 @@ export function makeAnimateBuilder(mob, config = {}) {
       return new Transform(mob, target, this._config);
     },
   };
-  const proxy = new Proxy(state, {
-    get(t, prop) {
+  const proxy: any = new Proxy(state, {
+    get(t: any, prop: string | symbol) {
       if (prop in t) return t[prop];
       const value = target[prop];
       if (typeof value === "function") {
-        return (...args) => {
+        return (...args: any[]) => {
           value.apply(target, args);
           return proxy;
         };

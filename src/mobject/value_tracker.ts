@@ -3,6 +3,20 @@
 
 import { Mobject } from "./Mobject.ts";
 import { Text } from "./text/Text.ts";
+import type { Vec3 } from "../core/types.ts";
+
+/** Config accepted by DecimalNumber/Integer (extends Text's config loosely). */
+export interface DecimalNumberConfig {
+  numDecimalPlaces?: number;
+  unit?: string;
+  includeSign?: boolean;
+  groupWithCommas?: boolean;
+  showEllipsis?: boolean;
+  edgeToFix?: number[];
+  point?: number[];
+  at?: number[];
+  [key: string]: any;
+}
 
 export class ValueTracker extends Mobject {
   constructor(value = 0) {
@@ -10,21 +24,21 @@ export class ValueTracker extends Mobject {
     this.points = [[value, 0, 0]];
   }
 
-  getValue() {
+  getValue(): number {
     return this.points[0][0];
   }
 
-  setValue(v) {
+  setValue(v: number): this {
     this.points[0][0] = v;
     return this;
   }
 
-  increment(dv) {
+  increment(dv: number): this {
     this.points[0][0] += dv;
     return this;
   }
 
-  interpolate(start, target, alpha) {
+  interpolate(start: ValueTracker, target: ValueTracker, alpha: number): this {
     const a = start.points[0][0];
     const b = target.points[0][0];
     this.points[0][0] = a + (b - a) * alpha;
@@ -33,7 +47,15 @@ export class ValueTracker extends Mobject {
 }
 
 export class DecimalNumber extends Text {
-  constructor(value = 0, config = {}) {
+  numDecimalPlaces: number;
+  unit: string;
+  includeSign: boolean;
+  groupWithCommas: boolean;
+  showEllipsis: boolean;
+  edgeToFix: number[];
+  value: number;
+
+  constructor(value = 0, config: DecimalNumberConfig = {}) {
     const numDecimalPlaces = config.numDecimalPlaces ?? 2;
     const cfg = { ...config };
     // Temporarily construct with a placeholder; _format needs the fields below.
@@ -51,7 +73,7 @@ export class DecimalNumber extends Text {
     if (config.point ?? config.at) this.moveTo(config.point ?? config.at);
   }
 
-  _format(value) {
+  _format(value: number): string {
     const neg = value < 0;
     let s = Math.abs(value).toFixed(this.numDecimalPlaces);
     if (this.groupWithCommas) {
@@ -63,15 +85,15 @@ export class DecimalNumber extends Text {
     return sign + s + (this.showEllipsis ? "…" : "") + this.unit;
   }
 
-  getValue() {
+  getValue(): number {
     return this.value;
   }
 
-  incrementValue(delta = 1) {
+  incrementValue(delta = 1): this {
     return this.setValue(this.value + delta);
   }
 
-  setValue(value) {
+  setValue(value: number): this {
     this.value = value;
     // Pin the configured edge so a changing width doesn't shift the number.
     const anchor = this.getBoundaryPoint(this.edgeToFix);
@@ -83,26 +105,26 @@ export class DecimalNumber extends Text {
 }
 
 export class Integer extends DecimalNumber {
-  constructor(value = 0, config = {}) {
+  constructor(value = 0, config: DecimalNumberConfig = {}) {
     super(Math.round(value), { ...config, numDecimalPlaces: 0 });
   }
 
-  setValue(value) {
+  setValue(value: number): this {
     return super.setValue(Math.round(value));
   }
 }
 
 // A mobject whose geometry is rebuilt every frame by `fn` (manim's
 // always_redraw). Returns a wrapper mobject carrying an updater.
-export function alwaysRedraw(fn) {
+export function alwaysRedraw(fn: () => Mobject): Mobject {
   const current = fn();
-  current.addUpdater((mob) => {
+  current.addUpdater((mob: Mobject) => {
     const fresh = fn();
     mob.points = fresh.points;
     mob.submobjects = fresh.submobjects;
     // Copy common style fields so the redraw is visible.
     for (const k of ["fillColor", "strokeColor", "fillOpacity", "strokeOpacity", "strokeWidth", "color", "text", "opacity"]) {
-      if (k in fresh) mob[k] = fresh[k];
+      if (k in fresh) (mob as any)[k] = (fresh as any)[k];
     }
   });
   return current;

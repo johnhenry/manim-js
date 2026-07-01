@@ -10,8 +10,24 @@
 import * as V from "../core/math/vector.ts";
 import { collectBuffers } from "./geometry_util.ts";
 
+export interface ThreeRendererOptions {
+  camera?: any;
+  background?: string;
+  canvas?: any;
+  antialias?: boolean;
+  [key: string]: any;
+}
+
 export class ThreeRenderer {
-  constructor(THREE, opts = {}) {
+  THREE: any;
+  camera: any;
+  background: string;
+  renderer: any;
+  scene: any;
+  group: any;
+  threeCamera: any;
+
+  constructor(THREE: any, opts: ThreeRendererOptions = {}) {
     this.THREE = THREE;
     this.camera = opts.camera;
     this.background = opts.background ?? "#000000";
@@ -31,11 +47,11 @@ export class ThreeRenderer {
     this.threeCamera = this._makeCamera();
   }
 
-  is3D() {
+  is3D(): boolean {
     return typeof this.camera.projectionDepth === "function";
   }
 
-  _makeCamera() {
+  _makeCamera(): any {
     const { THREE, camera } = this;
     if (this.is3D()) {
       const fov = (2 * Math.atan((camera.frameHeight / 2) / camera.focalDistance) * 180) / Math.PI;
@@ -46,12 +62,12 @@ export class ThreeRenderer {
   }
 
   // Position the Three camera to reproduce ThreeDCamera's phi/theta/focal view.
-  syncCamera() {
+  syncCamera(): void {
     const { camera, threeCamera } = this;
     const center = camera.frameCenter ?? [0, 0, 0];
     if (this.is3D()) {
       // Inverse of ThreeDCamera.toCameraSpace: rotate camera-space basis into world.
-      const rot = (v) => V.rotateVector(V.rotateVector(v, camera.phi, [1, 0, 0]), camera.theta + 90 * V.DEGREES, [0, 0, 1]);
+      const rot = (v: number[]) => V.rotateVector(V.rotateVector(v, camera.phi, [1, 0, 0]), camera.theta + 90 * V.DEGREES, [0, 0, 1]);
       const eye = V.add(center, rot([0, 0, camera.focalDistance]));
       const up = rot([0, 1, 0]);
       threeCamera.position.set(eye[0], eye[1], eye[2]);
@@ -68,7 +84,7 @@ export class ThreeRenderer {
     threeCamera.updateProjectionMatrix();
   }
 
-  render(mobjects) {
+  render(mobjects: any[]): void {
     const buf = collectBuffers(mobjects);
     this._clearGroup();
 
@@ -82,7 +98,7 @@ export class ThreeRenderer {
     this.renderer.render(this.scene, this.threeCamera);
   }
 
-  _mesh(buf, transparent, alpha) {
+  _mesh(buf: any, transparent: boolean, alpha: number): any {
     const { THREE } = this;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(buf.positions, 3));
@@ -94,7 +110,7 @@ export class ThreeRenderer {
     return new THREE.Mesh(g, m);
   }
 
-  _lines(buf) {
+  _lines(buf: any): any {
     const { THREE } = this;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(buf.positions, 3));
@@ -102,18 +118,18 @@ export class ThreeRenderer {
     return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true }));
   }
 
-  _textSprite(mob) {
+  _textSprite(mob: any): any {
     const { THREE } = this;
     if (typeof document === "undefined") return null; // headless / node: skip
     const lines = mob.text.split("\n");
     const fontPx = 64;
     const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d")!;
     ctx.font = `${mob.weight ?? "normal"} ${fontPx}px ${mob.font ?? "sans-serif"}`;
     const wPx = Math.max(1, ...lines.map((l) => ctx.measureText(l).width));
     canvas.width = Math.ceil(wPx);
     canvas.height = Math.ceil(fontPx * 1.3 * lines.length);
-    const c2 = canvas.getContext("2d");
+    const c2 = canvas.getContext("2d")!;
     c2.font = `${mob.weight ?? "normal"} ${fontPx}px ${mob.font ?? "sans-serif"}`;
     c2.textAlign = "center";
     c2.textBaseline = "middle";
@@ -130,7 +146,7 @@ export class ThreeRenderer {
 
   // A textured quad built from the ImageMobject's four (possibly transformed)
   // corner points, so it lives correctly in 3D.
-  _imageQuad(mob) {
+  _imageQuad(mob: any): any {
     const { THREE } = this;
     if (!mob.image) return null;
     const [tl, tr, br, bl] = mob.points;
@@ -146,7 +162,7 @@ export class ThreeRenderer {
     return new THREE.Mesh(g, m);
   }
 
-  _clearGroup() {
+  _clearGroup(): void {
     for (const child of this.group.children) {
       if (child.geometry) child.geometry.dispose();
       if (child.material) {
@@ -157,7 +173,7 @@ export class ThreeRenderer {
     this.group.clear();
   }
 
-  setSize(pixelWidth, pixelHeight) {
+  setSize(pixelWidth: number, pixelHeight: number): void {
     this.camera.pixelWidth = pixelWidth;
     this.camera.pixelHeight = pixelHeight;
     this.renderer.setSize(pixelWidth, pixelHeight, false);
@@ -165,7 +181,7 @@ export class ThreeRenderer {
     this.threeCamera.updateProjectionMatrix();
   }
 
-  dispose() {
+  dispose(): void {
     this._clearGroup();
     this.renderer.dispose();
   }

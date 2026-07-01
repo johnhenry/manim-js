@@ -9,19 +9,41 @@ import { VMobject, VGroup } from "./VMobject.ts";
 import { Color } from "../core/color.ts";
 import { parsePathToSubpaths } from "./svg_path.ts";
 import { arcBezierPoints } from "../core/math/bezier.ts";
+import type { ColorLike } from "../core/types.ts";
+
+/** A parsed XML element node. */
+export interface XmlNode {
+  tag: string;
+  attrs: Record<string, string>;
+  children: XmlNode[];
+}
+
+/** Configuration accepted by SVGMobject. */
+export interface SVGMobjectConfig {
+  height?: number;
+  width?: number;
+  point?: number[];
+  fillColor?: ColorLike;
+  strokeColor?: ColorLike;
+  color?: ColorLike;
+  [key: string]: any;
+}
+
+/** A row-major 2x3 affine [a,b,c,d,e,f]. */
+type Affine = [number, number, number, number, number, number];
 
 // ---------------------------------------------------------------------------
 // 1. Minimal XML parser -> { tag, attrs, children } tree. Text nodes ignored.
 // Handles: elements, self-closing <x/>, nesting, single/double-quoted attrs,
 // comments <!-- -->, <?xml ?>, <!DOCTYPE>, and <![CDATA[ ]]> (all skipped).
 // ---------------------------------------------------------------------------
-export function parseXML(str) {
+export function parseXML(str: string): XmlNode {
   let i = 0;
   const n = str.length;
 
   // Parse an attribute list starting at i, up to (but not consuming) `>` or `/`.
-  const parseAttrs = () => {
-    const attrs = {};
+  const parseAttrs = (): Record<string, string> => {
+    const attrs: Record<string, string> = {};
     while (i < n) {
       // skip whitespace
       while (i < n && /\s/.test(str[i])) i++;
@@ -49,8 +71,8 @@ export function parseXML(str) {
   };
 
   // Parse children of the current element until its matching close tag.
-  const parseNodes = () => {
-    const nodes = [];
+  const parseNodes = (): XmlNode[] => {
+    const nodes: XmlNode[] = [];
     while (i < n) {
       if (str[i] === "<") {
         // Comment / declaration / CDATA — skip wholesale.
@@ -64,7 +86,7 @@ export function parseXML(str) {
         let tag = "";
         while (i < n && !/[\s/>]/.test(str[i])) tag += str[i++];
         const attrs = parseAttrs();
-        let children = [];
+        let children: XmlNode[] = [];
         if (str[i] === "/") { i = skipTo(str, i, ">"); }        // self-closing
         else { i++; children = parseNodes(); }                  // consume '>', recurse
         nodes.push({ tag, attrs, children });
@@ -82,13 +104,13 @@ export function parseXML(str) {
 }
 
 // Advance past the next occurrence of `end`, returning the index after it.
-function skipTo(str, from, end) {
+function skipTo(str: string, from: number, end: string): number {
   const idx = str.indexOf(end, from);
   return idx === -1 ? str.length : idx + end.length;
 }
 
 // Decode the handful of XML entities that appear in attribute values.
-function decodeEntities(s) {
+function decodeEntities(s: string): string {
   return s
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
@@ -99,10 +121,10 @@ function decodeEntities(s) {
 // 2. Transform parsing. Affines are row-major [a,b,c,d,e,f] mapping
 //    (x,y) -> (a*x + c*y + e, b*x + d*y + f) — matching SVG matrix(a b c d e f).
 // ---------------------------------------------------------------------------
-const IDENTITY = [1, 0, 0, 1, 0, 0];
+const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
 
 // Multiply two affines: apply `child` first, then `parent` (result = parent*child).
-export function compose(parent, child) {
+export function compose(parent: Affine, child: Affine): Affine {
   const [a, b, c, d, e, f] = parent;
   const [a2, b2, c2, d2, e2, f2] = child;
   return [
@@ -115,21 +137,21 @@ export function compose(parent, child) {
   ];
 }
 
-function applyAffine(m, x, y) {
+function applyAffine(m: Affine, x: number, y: number): number[] {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 }
 
 // Parse an SVG transform attribute (chained translate/scale/rotate/matrix) into
 // one composed affine.
-export function parseTransform(str) {
-  if (!str) return IDENTITY.slice();
-  let m = IDENTITY.slice();
+export function parseTransform(str: string): Affine {
+  if (!str) return IDENTITY.slice() as Affine;
+  let m = IDENTITY.slice() as Affine;
   const re = /(translate|scale|rotate|matrix)\s*\(([^)]*)\)/g;
   let match;
   while ((match = re.exec(str)) !== null) {
     const kind = match[1];
     const nums = match[2].split(/[\s,]+/).filter((s) => s.length).map(Number);
-    let t = IDENTITY.slice();
+    let t: Affine = IDENTITY.slice() as Affine;
     if (kind === "translate") {
       t = [1, 0, 0, 1, nums[0] || 0, nums[1] || 0];
     } else if (kind === "scale") {
@@ -139,7 +161,7 @@ export function parseTransform(str) {
     } else if (kind === "rotate") {
       const rad = ((nums[0] || 0) * Math.PI) / 180;
       const cos = Math.cos(rad), sin = Math.sin(rad);
-      const rot = [cos, sin, -sin, cos, 0, 0];
+      const rot: Affine = [cos, sin, -sin, cos, 0, 0];
       if (nums.length >= 3) {
         // rotate(deg, cx, cy) = translate(cx,cy) * rot * translate(-cx,-cy)
         const cx = nums[1], cy = nums[2];
@@ -163,8 +185,8 @@ export function parseTransform(str) {
 const DRAWABLE = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
 
 // Parse a CSS style string ("fill:#f00;stroke:none") into a plain object.
-function parseStyleString(s) {
-  const out = {};
+function parseStyleString(s: string): Record<string, string> {
+  const out: Record<string, string> = {};
   if (!s) return out;
   for (const decl of s.split(";")) {
     const idx = decl.indexOf(":");
@@ -179,9 +201,9 @@ function parseStyleString(s) {
 // Collect the style-relevant props for a node, folding presentation attributes
 // and inline style together (style wins). Only defined keys are returned so
 // they can be layered over the inherited parent style.
-function readStyleProps(attrs) {
+function readStyleProps(attrs: Record<string, string>): Record<string, string> {
   const inline = parseStyleString(attrs.style);
-  const props = {};
+  const props: Record<string, string> = {};
   const KEYS = ["fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "opacity"];
   for (const k of KEYS) {
     if (inline[k] !== undefined) props[k] = inline[k];
@@ -192,7 +214,7 @@ function readStyleProps(attrs) {
 
 // Parse a color token: none / #rgb / #rrggbb / rgb(r,g,b) / named-ish hex.
 // Returns { color, isNone }.
-function parseColorToken(tok) {
+function parseColorToken(tok: string | null | undefined): { color: Color | null; isNone: boolean } {
   if (tok == null) return { color: null, isNone: false };
   const t = String(tok).trim().toLowerCase();
   if (t === "none" || t === "transparent") return { color: null, isNone: true };
@@ -207,7 +229,11 @@ function parseColorToken(tok) {
 }
 
 // Turn an inherited+merged style object into VMobject fill/stroke values.
-function resolveStyle(style, overrideFill, overrideStroke) {
+function resolveStyle(
+  style: Record<string, string>,
+  overrideFill: ColorLike | null,
+  overrideStroke: ColorLike | null,
+): { fillColor: Color; fillOpacity: number; strokeColor: Color; strokeWidth: number; strokeOpacity: number } {
   const fillTok = style.fill;                       // may be undefined -> SVG default black
   const strokeTok = style.stroke;                   // undefined -> no stroke
   const groupOpacity = style.opacity !== undefined ? Number(style.opacity) : 1;
@@ -247,10 +273,10 @@ function resolveStyle(style, overrideFill, overrideStroke) {
 // Geometry helpers: build flat cubic-Bezier subpaths (y-down space) for each
 // primitive, so the same "apply affine + flip Y" path handles everything.
 // ---------------------------------------------------------------------------
-const num = (v, d = 0) => { const x = parseFloat(v); return Number.isFinite(x) ? x : d; };
+const num = (v: string | undefined, d = 0): number => { const x = parseFloat(v as string); return Number.isFinite(x) ? x : d; };
 
 // Corner list -> single closed/open cubic subpath (straight segments).
-function cornersToSubpath(corners, close) {
+function cornersToSubpath(corners: number[][], close: boolean): number[][] {
   if (corners.length === 0) return [];
   const pts = corners.map((c) => [c[0], c[1], 0]);
   const loop = close ? [...pts, pts[0]] : pts;
@@ -267,15 +293,15 @@ function cornersToSubpath(corners, close) {
 }
 
 // Parse a "x,y x,y ..." points string into [[x,y],...].
-function parsePoints(s) {
+function parsePoints(s: string): number[][] {
   const nums = (s || "").split(/[\s,]+/).filter((t) => t.length).map(Number);
-  const pts = [];
+  const pts: number[][] = [];
   for (let k = 0; k + 1 < nums.length; k += 2) pts.push([nums[k], nums[k + 1]]);
   return pts;
 }
 
 // Build the y-down subpaths for one drawable element (before any transform).
-function elementSubpaths(tag, attrs) {
+function elementSubpaths(tag: string, attrs: Record<string, string>): number[][][] {
   switch (tag) {
     case "path":
       return parsePathToSubpaths(attrs.d || "");
@@ -312,8 +338,10 @@ function elementSubpaths(tag, attrs) {
 //    build a VMobject per drawable element, flip Y once, then size & place.
 // ---------------------------------------------------------------------------
 export class SVGMobject extends VGroup {
+  config: SVGMobjectConfig;
+
   // new SVGMobject(svgString, { height, width, point, fillColor, strokeColor, color })
-  constructor(svgString = "", config = {}) {
+  constructor(svgString = "", config: SVGMobjectConfig = {}) {
     super();
     this.config = config;
     const tree = parseXML(String(svgString));
@@ -321,10 +349,10 @@ export class SVGMobject extends VGroup {
     const overrideFill = config.fillColor ?? config.color ?? null;
     const overrideStroke = config.strokeColor ?? null;
 
-    const mobs = [];
+    const mobs: VMobject[] = [];
 
     // Depth-first walk accumulating transform (parent->child) and style.
-    const walk = (node, transform, parentStyle) => {
+    const walk = (node: XmlNode, transform: Affine, parentStyle: Record<string, string>) => {
       const attrs = node.attrs || {};
       // Accumulate this node's own transform (present on <g> and any element).
       let m = transform;
@@ -359,7 +387,7 @@ export class SVGMobject extends VGroup {
 
     // Root style seeds the SVG defaults (fill black, no stroke) plus any style
     // declared on the <svg> element itself.
-    walk(tree, IDENTITY.slice(), readStyleProps(tree.attrs || {}));
+    walk(tree, IDENTITY.slice() as Affine, readStyleProps(tree.attrs || {}));
 
     this.add(...mobs);
 

@@ -3,6 +3,7 @@
 // regular/bold/italic files under the "sans-serif" alias so Text works out of
 // the box. Falls back to scanning common font directories.
 
+/// <reference types="node" />
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { join } from "node:path";

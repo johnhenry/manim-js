@@ -2,8 +2,37 @@
 // fps. It is backend-agnostic: a backend sets `frameHandler` (called with the
 // list of top-level mobjects once per frame) and awaits `render()`.
 
+import type { Mobject } from "../mobject/Mobject.ts";
+import type { Camera } from "../renderer/CanvasRenderer.ts";
+
+/** A frame callback invoked once per frame with the top-level mobjects. */
+export type FrameHandler = (mobjects: Mobject[], frameCount: number, time: number) => void | Promise<void>;
+
+/** A scheduled audio clip. */
+export interface SceneSound {
+  file: string;
+  time: number;
+  gain: number;
+}
+
+/** Configuration accepted by the Scene constructor. */
+export interface SceneConfig {
+  fps?: number;
+  camera?: Camera | null;
+  frameHandler?: FrameHandler;
+  [key: string]: any;
+}
+
 export class Scene {
-  constructor(config = {}) {
+  mobjects: Mobject[];
+  fps: number;
+  camera: Camera | null;
+  frameHandler: FrameHandler;
+  time: number;
+  frameCount: number;
+  sounds: SceneSound[];
+
+  constructor(config: SceneConfig = {}) {
     this.mobjects = [];
     this.fps = config.fps ?? 30;
     this.camera = config.camera ?? null;
@@ -17,54 +46,54 @@ export class Scene {
   // it between play()/wait() lines lands the sound at that moment. The Node
   // backend muxes these into the video with ffmpeg; the browser backend plays
   // them live during playback.
-  addSound(file, { timeOffset, gain = 1 } = {}) {
+  addSound(file: string, { timeOffset, gain = 1 }: { timeOffset?: number; gain?: number } = {}): this {
     this.sounds.push({ file, time: timeOffset ?? this.time, gain });
     return this;
   }
 
-  add(...mobs) {
+  add(...mobs: (Mobject | Mobject[])[]): this {
     for (const m of mobs.flat()) {
       if (m && !this.mobjects.includes(m)) this.mobjects.push(m);
     }
     return this;
   }
 
-  remove(...mobs) {
+  remove(...mobs: (Mobject | Mobject[])[]): this {
     const set = new Set(mobs.flat());
     this.mobjects = this.mobjects.filter((m) => !set.has(m));
     return this;
   }
 
-  bringToFront(mob) {
+  bringToFront(mob: Mobject): this {
     this.remove(mob);
     this.mobjects.push(mob);
     return this;
   }
 
-  clear() {
+  clear(): this {
     this.mobjects = [];
     return this;
   }
 
   // Override in subclasses (or pass config.construct) to define the animation.
-  async construct() {}
+  async construct(): Promise<void> {}
 
-  async emitFrame() {
+  async emitFrame(): Promise<void> {
     await this.frameHandler(this.mobjects, this.frameCount, this.time);
     this.frameCount++;
   }
 
-  updateMobjects(dt) {
+  updateMobjects(dt: number): void {
     for (const m of this.mobjects) m.update(dt);
   }
 
-  hasUpdaters() {
+  hasUpdaters(): boolean {
     return this.mobjects.some((m) => m.hasUpdaters());
   }
 
   // Play one or more animations in parallel for max(runTime).
-  async play(...animations) {
-    let config = {};
+  async play(...animations: any[]): Promise<this> {
+    let config: any = {};
     if (animations.length && animations[animations.length - 1] && animations[animations.length - 1]._playConfig) {
       config = animations.pop();
     }
@@ -105,7 +134,7 @@ export class Scene {
   }
 
   // Hold the current frame for `duration` seconds (runs updaters each frame).
-  async wait(duration = 1) {
+  async wait(duration = 1): Promise<this> {
     const nFrames = Math.max(1, Math.round(duration * this.fps));
     const dt = duration / nFrames;
     for (let f = 0; f < nFrames; f++) {
@@ -117,12 +146,12 @@ export class Scene {
   }
 
   // Add mobjects and show them for a moment (manim's self.add + a frame).
-  async pause(duration = 0.5) {
+  async pause(duration = 0.5): Promise<this> {
     return this.wait(duration);
   }
 
   // Full run: emit an initial frame, then the user's construct().
-  async render() {
+  async render(): Promise<this> {
     await this.construct();
     return this;
   }

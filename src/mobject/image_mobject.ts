@@ -5,9 +5,23 @@
 // renderer special-cases it (drawImage / textured quad).
 
 import { Mobject } from "./Mobject.ts";
+import type { MobjectConfig } from "./Mobject.ts";
+
+/** Configuration accepted by ImageMobject. */
+export interface ImageMobjectConfig extends MobjectConfig {
+  imageWidth?: number;
+  imageHeight?: number;
+  height?: number;
+  width?: number;
+  point?: number[];
+}
 
 export class ImageMobject extends Mobject {
-  constructor(image, config = {}) {
+  _isImage: boolean;
+  image: any;
+  aspect: number;
+
+  constructor(image: any, config: ImageMobjectConfig = {}) {
     super(config);
     this._isImage = true;
     this.image = image;
@@ -32,12 +46,12 @@ export class ImageMobject extends Mobject {
     if (config.point) this.moveTo(config.point);
   }
 
-  setImage(image) {
+  setImage(image: any): this {
     this.image = image;
     return this;
   }
 
-  copy() {
+  copy(): this {
     const c = super.copy();
     c.image = this.image; // share the bitmap
     return c;

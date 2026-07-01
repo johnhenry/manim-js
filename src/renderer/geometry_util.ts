@@ -5,8 +5,25 @@
 
 import { bezier } from "../core/math/bezier.ts";
 
+interface VertexBuffer {
+  positions: number[];
+  colors: number[];
+}
+
+interface TransparentBuffer extends VertexBuffer {
+  alpha: number;
+}
+
+interface CollectedBuffers {
+  opaque: VertexBuffer;
+  transparent: TransparentBuffer[];
+  lines: VertexBuffer;
+  texts: any[];
+  images: any[];
+}
+
 // Flatten a VMobject's subpaths into world-space polygon loops.
-export function flattenMobject(mob) {
+export function flattenMobject(mob: any): number[][][] {
   const seg = mob._straightPath ? 1 : 6;
   const loops = [];
   for (const sp of mob.getSubpaths()) {
@@ -22,7 +39,7 @@ export function flattenMobject(mob) {
   return loops;
 }
 
-const avg = (pts) => {
+const avg = (pts: number[][]): number[] => {
   let x = 0, y = 0, z = 0;
   for (const p of pts) { x += p[0]; y += p[1]; z += p[2]; }
   const n = pts.length || 1;
@@ -32,19 +49,19 @@ const avg = (pts) => {
 // Collect GPU-ready buffers from the mobject tree. Colors are 0..1 RGB.
 //   { opaque:{positions,colors}, transparent:[{alpha,positions,colors}],
 //     lines:{positions,colors}, texts:[mob,...] }
-export function collectBuffers(mobjects) {
-  const opaque = { positions: [], colors: [] };
-  const tBuckets = new Map(); // alpha(rounded) -> {alpha, positions, colors}
-  const lines = { positions: [], colors: [] };
-  const texts = [];
-  const images = [];
+export function collectBuffers(mobjects: any[]): CollectedBuffers {
+  const opaque: VertexBuffer = { positions: [], colors: [] };
+  const tBuckets = new Map<number, TransparentBuffer>(); // alpha(rounded) -> {alpha, positions, colors}
+  const lines: VertexBuffer = { positions: [], colors: [] };
+  const texts: any[] = [];
+  const images: any[] = [];
 
-  const pushTri = (target, a, b, c, ca, cb, cc) => {
+  const pushTri = (target: VertexBuffer, a: number[], b: number[], c: number[], ca: number[], cb: number[], cc: number[]): void => {
     target.positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     target.colors.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2], cc[0], cc[1], cc[2]);
   };
 
-  const walk = (m) => {
+  const walk = (m: any): void => {
     if (m.points && m.points.length) {
       if (m._isText) {
         texts.push(m);

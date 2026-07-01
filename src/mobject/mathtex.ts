@@ -7,16 +7,30 @@
 import { VMobject, VGroup } from "./VMobject.ts";
 import { Color, WHITE } from "../core/color.ts";
 import { parsePathToSubpaths } from "./svg_path.ts";
+import type { ColorLike } from "../core/types.ts";
+
+/** Configuration accepted by MathTex / Tex / texToVGroup. */
+export interface MathTexConfig {
+  color?: ColorLike;
+  fillColor?: ColorLike;
+  strokeColor?: ColorLike;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  strokeOpacity?: number;
+  fontSize?: number;
+  point?: number[];
+  [key: string]: any;
+}
 
 // --- lazy, cached MathJax document -----------------------------------------
-let _mj = null;
+let _mj: any = null;
 
 // MathJax modules are imported once, lazily, and memoized. Building a MathTex
 // is synchronous once this promise has resolved (it resolves fast; the first
 // convert warms the font cache).
-let _initPromise = null;
+let _initPromise: Promise<any> | null = null;
 
-export function initMathTex() {
+export function initMathTex(): Promise<any> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     const [{ mathjax }, { TeX }, { SVG }, { liteAdaptor }, { RegisterHTMLHandler }, { AllPackages }] =
@@ -43,9 +57,10 @@ export function initMathTex() {
 // --- 2x3 affine transform helpers ------------------------------------------
 // Row-major [a, b, c, d, e, f] mapping (x,y) -> (a*x + c*y + e, b*x + d*y + f),
 // matching SVG's transform matrix(a b c d e f).
-const IDENTITY = [1, 0, 0, 1, 0, 0];
+type Affine = [number, number, number, number, number, number];
+const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
 
-function compose(m, n) {
+function compose(m: Affine, n: Affine): Affine {
   // Apply n then m (m is the outer/parent transform): result = m * n.
   const [a, b, c, d, e, f] = m;
   const [a2, b2, c2, d2, e2, f2] = n;
@@ -59,13 +74,13 @@ function compose(m, n) {
   ];
 }
 
-function applyAffine(m, x, y) {
+function applyAffine(m: Affine, x: number, y: number): number[] {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 }
 
 // Parse an SVG transform attribute (translate/scale/matrix, possibly chained)
 // into a single composed 2x3 affine.
-function parseTransform(str) {
+function parseTransform(str: string): Affine {
   if (!str) return IDENTITY;
   let m = IDENTITY;
   const re = /(translate|scale|matrix)\s*\(([^)]*)\)/g;
@@ -73,7 +88,7 @@ function parseTransform(str) {
   while ((match = re.exec(str)) !== null) {
     const kind = match[1];
     const nums = match[2].split(/[\s,]+/).filter((s) => s.length).map(Number);
-    let t = IDENTITY;
+    let t: Affine = IDENTITY;
     if (kind === "translate") {
       t = [1, 0, 0, 1, nums[0] || 0, nums[1] || 0];
     } else if (kind === "scale") {
@@ -91,10 +106,10 @@ function parseTransform(str) {
 // --- lite-DOM walk ----------------------------------------------------------
 // Collect id -> path `d` from all <defs><path>, then instantiate every <use>
 // and <rect> under the accumulated transform. Emits {type, ...} draw records.
-function collectGlyphs(adaptor, svgNode) {
-  const defs = {};
+function collectGlyphs(adaptor: any, svgNode: any): any[] {
+  const defs: Record<string, string> = {};
 
-  function scanDefs(node) {
+  function scanDefs(node: any) {
     if (adaptor.kind(node) === "path") {
       const id = adaptor.getAttribute(node, "id");
       const d = adaptor.getAttribute(node, "d");
@@ -104,9 +119,9 @@ function collectGlyphs(adaptor, svgNode) {
   }
   scanDefs(svgNode);
 
-  const records = [];
+  const records: any[] = [];
 
-  function walk(node, transform) {
+  function walk(node: any, transform: Affine) {
     const kind = adaptor.kind(node);
     // Accumulate this node's own transform (present on <g> and sometimes <use>).
     let m = transform;
@@ -139,7 +154,7 @@ function collectGlyphs(adaptor, svgNode) {
 }
 
 // Find the <svg> element inside the returned <mjx-container>.
-function findSvg(adaptor, node) {
+function findSvg(adaptor: any, node: any): any {
   if (adaptor.kind(node) === "svg") return node;
   for (const child of adaptor.childNodes(node) || []) {
     const found = findSvg(adaptor, child);
@@ -153,7 +168,7 @@ function findSvg(adaptor, node) {
 // then wraps everything in an outer scale(1,-1). Applying the fully composed
 // affine to each point yields SVG-style y-DOWN screen coordinates; we flip that
 // once (negate y) to reach manim's y-UP world. No double flip.
-export function texToVGroup(tex, config = {}) {
+export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
   if (!_mj) throw new Error("MathTex requires MathJax; call `await initMathTex()` once before constructing.");
   const { adaptor, doc } = _mj;
 
@@ -174,7 +189,7 @@ export function texToVGroup(tex, config = {}) {
   const UNIT = 1 / 1000;
   const group = new VGroup();
 
-  const styleMob = (mob) => {
+  const styleMob = (mob: any) => {
     mob.fillColor = Color.parse(fillColor);
     mob.strokeColor = Color.parse(strokeColor);
     mob.fillOpacity = fillOpacity;
@@ -232,8 +247,10 @@ export function texToVGroup(tex, config = {}) {
 
 // --- public classes ---------------------------------------------------------
 export class MathTex extends VGroup {
+  tex: string;
+
   // new MathTex(tex, { fontSize, color, fillOpacity, strokeWidth, point })
-  constructor(tex = "", config = {}) {
+  constructor(tex = "", config: MathTexConfig = {}) {
     super();
     this.tex = String(tex);
     this.fillColor = Color.parse(config.color ?? config.fillColor ?? WHITE);
@@ -245,8 +262,8 @@ export class MathTex extends VGroup {
     this.strokeOpacity = config.strokeOpacity ?? (this.strokeWidth ? 1 : 0);
   }
 
-  setStyle(style) {
-    for (const g of this.submobjects) g.setStyle(style);
+  setStyle(style: any): this {
+    for (const g of this.submobjects) (g as any).setStyle(style);
     return this;
   }
 }
@@ -254,7 +271,7 @@ export class MathTex extends VGroup {
 // Tex renders the string in MathJax's default math mode (same pipeline as
 // MathTex). Kept simple: pass the string through unchanged.
 export class Tex extends MathTex {
-  constructor(tex = "", config = {}) {
+  constructor(tex = "", config: MathTexConfig = {}) {
     super(tex, config);
   }
 }

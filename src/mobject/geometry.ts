@@ -2,12 +2,25 @@
 // Polygon, Rectangle, Square, RegularPolygon, Triangle.
 
 import { VMobject } from "./VMobject.ts";
+import type { VMobjectConfig } from "./VMobject.ts";
 import * as V from "../core/math/vector.ts";
 import { arcBezierPoints } from "../core/math/bezier.ts";
 import { RED, WHITE } from "../core/color.ts";
 
+export interface ArcConfig extends VMobjectConfig {
+  radius?: number;
+  startAngle?: number;
+  angle?: number;
+  arcCenter?: number[];
+}
+
 export class Arc extends VMobject {
-  constructor(config = {}) {
+  radius: number;
+  startAngle: number;
+  angle: number;
+  arcCenter: number[];
+
+  constructor(config: ArcConfig = {}) {
     super(config);
     this.radius = config.radius ?? 1;
     this.startAngle = config.startAngle ?? 0;
@@ -19,15 +32,19 @@ export class Arc extends VMobject {
 }
 
 export class Circle extends Arc {
-  constructor(config = {}) {
+  constructor(config: ArcConfig = {}) {
     // manim's Circle defaults to a RED stroke with no fill.
     super({ angle: 2 * Math.PI, fillOpacity: 0, ...config, color: config.color ?? RED });
     if (config.fillColor != null && config.fillOpacity == null) this.fillOpacity = 1;
   }
 }
 
+export interface DotConfig extends ArcConfig {
+  point?: number[];
+}
+
 export class Dot extends Circle {
-  constructor(config = {}) {
+  constructor(config: DotConfig = {}) {
     const point = config.point ?? V.ORIGIN;
     // manim's Dot defaults to a filled WHITE dot (radius 0.08, no stroke).
     super({ radius: config.radius ?? 0.08, fillOpacity: 1, strokeWidth: 0, ...config, color: config.color ?? WHITE });
@@ -35,8 +52,13 @@ export class Dot extends Circle {
   }
 }
 
+export interface EllipseConfig extends VMobjectConfig {
+  width?: number;
+  height?: number;
+}
+
 export class Ellipse extends VMobject {
-  constructor(config = {}) {
+  constructor(config: EllipseConfig = {}) {
     super({ ...config, color: config.color ?? RED }); // manim: Ellipse(Circle) -> RED
     const w = config.width ?? 2;
     const h = config.height ?? 1;
@@ -48,8 +70,14 @@ export class Ellipse extends VMobject {
   }
 }
 
+export interface AnnulusConfig extends VMobjectConfig {
+  outerRadius?: number;
+  innerRadius?: number;
+  arcCenter?: number[];
+}
+
 export class Annulus extends VMobject {
-  constructor(config = {}) {
+  constructor(config: AnnulusConfig = {}) {
     super({ fillOpacity: 1, strokeWidth: 0, ...config });
     // manim defaults: inner_radius=1, outer_radius=2.
     const outer = config.outerRadius ?? 2;
@@ -61,16 +89,24 @@ export class Annulus extends VMobject {
   }
 }
 
+export interface LineConfig extends VMobjectConfig {
+  start?: number[];
+  end?: number[];
+}
+
 export class Line extends VMobject {
-  constructor(start = V.LEFT, end = V.RIGHT, config = {}) {
+  start: number[];
+  end: number[];
+
+  constructor(start: number[] | LineConfig = V.LEFT, end: number[] = V.RIGHT, config: LineConfig = {}) {
     // Allow Line({start, end, ...}) style too.
-    if (start && typeof start === "object" && !Array.isArray(start) && start.start) {
-      config = start;
-      start = config.start;
-      end = config.end;
+    if (start && typeof start === "object" && !Array.isArray(start) && (start as LineConfig).start) {
+      config = start as LineConfig;
+      start = config.start as number[];
+      end = config.end as number[];
     }
     super(config);
-    this.start = start ?? V.LEFT;
+    this.start = (start as number[]) ?? V.LEFT;
     this.end = end ?? V.RIGHT;
     this.fillOpacity = 0;
     this.setPointsAsCorners([this.start, this.end]);
@@ -81,14 +117,24 @@ export class Line extends VMobject {
   getLength() { return V.distance(this.getStart(), this.getEnd()); }
   getAngle() { return V.angleOf(V.sub(this.getEnd(), this.getStart())); }
 
-  putStartAndEndOn(start, end) {
+  putStartAndEndOn(start: number[], end: number[]): this {
     this.setPointsAsCorners([start, end]);
     return this;
   }
 }
 
+export interface DashedLineConfig extends LineConfig {
+  numDashes?: number;
+  dashedRatio?: number;
+  dashRatio?: number;
+}
+
 export class DashedLine extends Line {
-  constructor(start, end, config = {}) {
+  numDashes: number;
+  dashedRatio: number;
+  _dashed: boolean;
+
+  constructor(start: number[] | LineConfig, end: number[], config: DashedLineConfig = {}) {
     super(start, end, config);
     this.numDashes = config.numDashes ?? 15;
     this.dashedRatio = config.dashedRatio ?? config.dashRatio ?? 0.5;
@@ -98,7 +144,7 @@ export class DashedLine extends Line {
 
   // Rebuild the path as `n` short straight dash subpaths so it actually renders
   // dashed. Each dash covers `ratio/n` of the line; the gaps make up the rest.
-  _dashify(n, ratio) {
+  _dashify(n: number, ratio: number): this {
     const start = this.start, end = this.end;
     this.points = [];
     this.subpathStarts = [];
@@ -120,15 +166,23 @@ export class DashedLine extends Line {
   getEnd() { return this.end; }
 }
 
+export interface ArrowConfig extends LineConfig {
+  tipLength?: number;
+}
+
 export class Arrow extends Line {
-  constructor(start = V.LEFT, end = V.RIGHT, config = {}) {
+  tipLength: number;
+  _hasTip: boolean;
+  tip: VMobject;
+
+  constructor(start: number[] | LineConfig = V.LEFT, end: number[] = V.RIGHT, config: ArrowConfig = {}) {
     super(start, end, config);
     this.tipLength = config.tipLength ?? 0.25;
     this._hasTip = true;
     this.buildTip();
   }
 
-  buildTip() {
+  buildTip(): this {
     const s = this.getStart();
     const e = this.getEnd();
     const dir = V.normalize(V.sub(e, s));
@@ -148,7 +202,9 @@ export class Arrow extends Line {
 }
 
 export class Polygon extends VMobject {
-  constructor(vertices = [], config = {}) {
+  vertices: number[][];
+
+  constructor(vertices: number[][] = [], config: VMobjectConfig = {}) {
     super(config);
     this.vertices = vertices;
     this.fillOpacity = config.fillOpacity ?? 0;
@@ -159,11 +215,16 @@ export class Polygon extends VMobject {
   getVertices() { return this.vertices; }
 }
 
+export interface RegularPolygonConfig extends VMobjectConfig {
+  radius?: number;
+  startAngle?: number;
+}
+
 export class RegularPolygon extends Polygon {
-  constructor(n = 6, config = {}) {
+  constructor(n = 6, config: RegularPolygonConfig = {}) {
     const radius = config.radius ?? 1;
     const start = config.startAngle ?? (n % 2 === 0 ? Math.PI / n : Math.PI / 2);
-    const verts = [];
+    const verts: number[][] = [];
     for (let i = 0; i < n; i++) {
       const a = start + (2 * Math.PI * i) / n;
       verts.push([radius * Math.cos(a), radius * Math.sin(a), 0]);
@@ -173,13 +234,21 @@ export class RegularPolygon extends Polygon {
 }
 
 export class Triangle extends RegularPolygon {
-  constructor(config = {}) {
+  constructor(config: RegularPolygonConfig = {}) {
     super(3, config);
   }
 }
 
+export interface RectangleConfig extends VMobjectConfig {
+  width?: number;
+  height?: number;
+}
+
 export class Rectangle extends Polygon {
-  constructor(config = {}) {
+  width: number;
+  height: number;
+
+  constructor(config: RectangleConfig = {}) {
     const w = config.width ?? 4;
     const h = config.height ?? 2;
     const verts = [
@@ -194,8 +263,15 @@ export class Rectangle extends Polygon {
   }
 }
 
+export interface SquareConfig extends RectangleConfig {
+  sideLength?: number;
+  side?: number;
+}
+
 export class Square extends Rectangle {
-  constructor(config = {}) {
+  sideLength: number;
+
+  constructor(config: SquareConfig = {}) {
     const side = config.sideLength ?? config.side ?? 2;
     super({ ...config, width: side, height: side });
     this.sideLength = side;

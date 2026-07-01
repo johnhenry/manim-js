@@ -4,9 +4,33 @@
 import { smooth, linear, running } from "./rate_functions.ts";
 import { Color } from "../core/color.ts";
 import * as V from "../core/math/vector.ts";
+import type { Mobject } from "../mobject/Mobject.ts";
+import type { RateFunc } from "../core/types.ts";
+
+/** Configuration accepted by Animation constructors. */
+export interface AnimationConfig {
+  runTime?: number;
+  rateFunc?: RateFunc;
+  remover?: boolean;
+  introducer?: boolean;
+  lagRatio?: number;
+  [key: string]: any;
+}
 
 export class Animation {
-  constructor(mobject, config = {}) {
+  // Typed `any` because animations reach into VMobject-specific fields
+  // (alignPointsWith, strokeEnd, fillOpacity, _isText, ...) heterogeneously.
+  mobject: any;
+  runTime: number;
+  rateFunc: RateFunc;
+  remover: boolean;
+  introducer: boolean;
+  lagRatio: number;
+  started: boolean;
+  finished: boolean;
+  startState: any;
+
+  constructor(mobject: Mobject, config: AnimationConfig = {}) {
     this.mobject = mobject;
     this.runTime = config.runTime ?? 1;
     this.rateFunc = running(config.rateFunc ?? smooth);
@@ -18,7 +42,7 @@ export class Animation {
   }
 
   // Called once when the animation starts playing.
-  begin() {
+  begin(): this {
     this.started = true;
     this.startState = this.mobject.copy();
     this.setup();
@@ -26,39 +50,44 @@ export class Animation {
     return this;
   }
 
-  setup() {}
+  setup(): void {}
 
-  finish() {
+  finish(): this {
     this.interpolate(1);
     this.finished = true;
     return this;
   }
 
   // alpha is raw progress in [0,1]; subclasses override interpolateMobject.
-  interpolate(alpha) {
+  interpolate(alpha: number): void {
     this.interpolateMobject(this.rateFunc(Math.max(0, Math.min(1, alpha))));
   }
 
-  interpolateMobject(_alpha) {}
+  interpolateMobject(_alpha: number): void {}
 
-  getMobjectsToIntroduce() {
+  getMobjectsToIntroduce(): Mobject[] {
     return this.introducer ? [this.mobject] : [];
   }
 
-  getMobjectsToRemove() {
+  getMobjectsToRemove(): Mobject[] {
     return this.remover ? [this.mobject] : [];
   }
 }
 
 // --- transform-style animations -------------------------------------------
 export class Transform extends Animation {
-  constructor(mobject, target, config = {}) {
+  target: any;
+  replace: boolean;
+  targetCopy: any;
+  startCopy: any;
+
+  constructor(mobject: Mobject, target: Mobject, config: AnimationConfig & { replace?: boolean } = {}) {
     super(mobject, config);
     this.target = target;
     this.replace = config.replace ?? false;
   }
 
-  setup() {
+  setup(): void {
     // Align point counts so interpolation is well defined.
     if (this.mobject.alignPointsWith && this.target.alignPointsWith) {
       this.targetCopy = this.target.copy();
@@ -74,20 +103,22 @@ export class Transform extends Animation {
     }
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     this.mobject.interpolate(this.startState, this.targetCopy, alpha);
   }
 }
 
 export class ReplacementTransform extends Transform {
-  constructor(mobject, target, config = {}) {
+  introduced: any;
+
+  constructor(mobject: Mobject, target: Mobject, config: AnimationConfig = {}) {
     super(mobject, target, { ...config, replace: true });
     this.remover = true;
     this.introducer = true;
     this.introduced = target;
   }
 
-  finish() {
+  finish(): this {
     super.finish();
     // Leave the target geometry in place under the original mobject.
     return this;
@@ -96,17 +127,19 @@ export class ReplacementTransform extends Transform {
 
 // --- creation animations ---------------------------------------------------
 export class Create extends Animation {
-  constructor(mobject, config = {}) {
+  origFill: number[];
+
+  constructor(mobject: Mobject, config: AnimationConfig = {}) {
     super(mobject, { rateFunc: config.rateFunc ?? smooth, ...config, introducer: true });
   }
 
-  setup() {
-    this.origFill = this.mobject.getFamily().map((m) => m.fillOpacity ?? 0);
+  setup(): void {
+    this.origFill = this.mobject.getFamily().map((m: any) => m.fillOpacity ?? 0);
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     const fam = this.mobject.getFamily();
-    fam.forEach((m, i) => {
+    fam.forEach((m: any, i: number) => {
       if (m._isText) {
         m.revealFraction = alpha; // typewriter reveal for Text
         return;
@@ -117,9 +150,9 @@ export class Create extends Animation {
     });
   }
 
-  finish() {
+  finish(): this {
     const fam = this.mobject.getFamily();
-    fam.forEach((m, i) => {
+    fam.forEach((m: any, i: number) => {
       if (m._isText) { m.revealFraction = 1; return; }
       m.strokeEnd = 1;
       if (m.fillOpacity != null) m.fillOpacity = this.origFill[i];
@@ -130,24 +163,24 @@ export class Create extends Animation {
 }
 
 export class Write extends Create {
-  constructor(mobject, config = {}) {
+  constructor(mobject: Mobject, config: AnimationConfig = {}) {
     super(mobject, { runTime: config.runTime ?? 1.5, rateFunc: config.rateFunc ?? linear, ...config });
   }
 }
 
 export class Uncreate extends Create {
-  constructor(mobject, config = {}) {
+  constructor(mobject: Mobject, config: AnimationConfig = {}) {
     super(mobject, config);
     this.remover = true;
     this.introducer = false;
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     super.interpolateMobject(1 - alpha);
   }
 
-  finish() {
-    this.mobject.getFamily().forEach((m) => (m.strokeEnd = 0));
+  finish(): this {
+    this.mobject.getFamily().forEach((m: any) => (m.strokeEnd = 0));
     this.finished = true;
     return this;
   }
@@ -155,20 +188,26 @@ export class Uncreate extends Create {
 
 // --- fading ----------------------------------------------------------------
 export class FadeIn extends Animation {
-  constructor(mobject, config = {}) {
+  shiftVec: number[];
+  scaleFactor: number;
+  targetOpacities: Array<{ fill: number; stroke: number; op: number }>;
+  finalPoints: number[][][];
+  startPoints: number[][][];
+
+  constructor(mobject: Mobject, config: AnimationConfig & { shift?: number[]; scale?: number } = {}) {
     super(mobject, { ...config, introducer: true });
     this.shiftVec = config.shift ?? [0, 0, 0];
     this.scaleFactor = config.scale ?? 1;
   }
 
-  setup() {
+  setup(): void {
     const fam = this.mobject.getFamily();
-    this.targetOpacities = fam.map((m) => ({
+    this.targetOpacities = fam.map((m: any) => ({
       fill: m.fillOpacity ?? m.opacity ?? 1,
       stroke: m.strokeOpacity ?? m.opacity ?? 1,
       op: m.opacity ?? 1,
     }));
-    this.finalPoints = fam.map((m) => m.points.map((p) => [...p]));
+    this.finalPoints = fam.map((m: any) => m.points.map((p: number[]) => [...p]));
     // The mobject fades in from a state scaled by `scale` about its center and
     // shifted by `-shift` (manim's _Fade). Precompute that start geometry.
     const c = this.mobject.getCenter();
@@ -180,9 +219,9 @@ export class FadeIn extends Animation {
     ]));
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     const fam = this.mobject.getFamily();
-    fam.forEach((m, i) => {
+    fam.forEach((m: any, i: number) => {
       const t = this.targetOpacities[i];
       m.fillOpacity = t.fill * alpha;
       m.strokeOpacity = t.stroke * alpha;
@@ -193,7 +232,7 @@ export class FadeIn extends Animation {
     });
   }
 
-  finish() {
+  finish(): this {
     this.interpolateMobject(1);
     this.finished = true;
     return this;
@@ -201,19 +240,25 @@ export class FadeIn extends Animation {
 }
 
 export class FadeOut extends Animation {
-  constructor(mobject, config = {}) {
+  shiftVec: number[];
+  scaleFactor: number;
+  startOpacities: Array<{ fill: number; stroke: number }>;
+  startPoints: number[][][];
+  endPoints: number[][][];
+
+  constructor(mobject: Mobject, config: AnimationConfig & { shift?: number[]; scale?: number } = {}) {
     super(mobject, { ...config, remover: true });
     this.shiftVec = config.shift ?? [0, 0, 0];
     this.scaleFactor = config.scale ?? 1;
   }
 
-  setup() {
+  setup(): void {
     const fam = this.mobject.getFamily();
-    this.startOpacities = fam.map((m) => ({
+    this.startOpacities = fam.map((m: any) => ({
       fill: m.fillOpacity ?? m.opacity ?? 1,
       stroke: m.strokeOpacity ?? m.opacity ?? 1,
     }));
-    this.startPoints = fam.map((m) => m.points.map((p) => [...p]));
+    this.startPoints = fam.map((m: any) => m.points.map((p: number[]) => [...p]));
     // Fades out toward a state scaled by `scale` about center and shifted by `shift`.
     const c = this.mobject.getCenter();
     const s = this.scaleFactor;
@@ -224,9 +269,9 @@ export class FadeOut extends Animation {
     ]));
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     const fam = this.mobject.getFamily();
-    fam.forEach((m, i) => {
+    fam.forEach((m: any, i: number) => {
       const s = this.startOpacities[i];
       m.fillOpacity = s.fill * (1 - alpha);
       m.strokeOpacity = s.stroke * (1 - alpha);
@@ -236,7 +281,7 @@ export class FadeOut extends Animation {
     });
   }
 
-  finish() {
+  finish(): this {
     this.interpolateMobject(1);
     this.finished = true;
     return this;
@@ -245,11 +290,15 @@ export class FadeOut extends Animation {
 
 // --- movement / method animations -----------------------------------------
 export class ApplyMethod extends Animation {
+  method: string | ((...args: any[]) => any);
+  args: any[];
+  targetCopy: any;
+
   // Records the effect of calling `method(...args)` on a copy, then tweens to it.
-  constructor(mobject, method, ...args) {
+  constructor(mobject: Mobject, method: string | ((...args: any[]) => any), ...args: any[]) {
     // Drop a trailing undefined/null (from optional config params in factories).
     while (args.length && args[args.length - 1] == null) args.pop();
-    let config = {};
+    let config: AnimationConfig = {};
     if (args.length && typeof args[args.length - 1] === "object" && args[args.length - 1]?._animConfig) {
       config = args.pop();
     }
@@ -258,33 +307,33 @@ export class ApplyMethod extends Animation {
     this.args = args;
   }
 
-  setup() {
+  setup(): void {
     this.targetCopy = this.mobject.copy();
     const fn = typeof this.method === "string" ? this.targetCopy[this.method] : this.method;
     fn.apply(this.targetCopy, this.args);
     if (this.mobject.alignPointsWith) {
       this.startState.alignPointsWith(this.targetCopy);
       this.targetCopy.alignPointsWith(this.startState);
-      this.mobject.points = this.startState.points.map((p) => [...p]);
+      this.mobject.points = this.startState.points.map((p: number[]) => [...p]);
       this.mobject.subpathStarts = [...(this.startState.subpathStarts ?? [])];
     }
   }
 
-  interpolateMobject(alpha) {
+  interpolateMobject(alpha: number): void {
     this.mobject.interpolate(this.startState, this.targetCopy, alpha);
   }
 }
 
 // Convenience factories mirroring manim's mobject.animate syntax.
-export const Shift = (mob, vec, config) => new ApplyMethod(mob, "shift", vec, config);
-export const MoveTo = (mob, pt, config) => new ApplyMethod(mob, "moveTo", pt, config);
-export const ScaleAnim = (mob, f, config) => new ApplyMethod(mob, "scale", f, config);
+export const Shift = (mob: Mobject, vec: number[], config?: AnimationConfig) => new ApplyMethod(mob, "shift", vec, config);
+export const MoveTo = (mob: Mobject, pt: number[], config?: AnimationConfig) => new ApplyMethod(mob, "moveTo", pt, config);
+export const ScaleAnim = (mob: Mobject, f: number, config?: AnimationConfig) => new ApplyMethod(mob, "scale", f, config);
 // NOTE: the animated `Rotate` lives in ./extra.js (a full Animation subclass with
 // about_point support). Do not re-add a factory named `Rotate` here — it caused a
 // duplicate-export collision.
 
 export class FadeToColor extends ApplyMethod {
-  constructor(mobject, color, config = {}) {
+  constructor(mobject: Mobject, color: any, config: AnimationConfig = {}) {
     super(mobject, "setColor", color, config);
   }
 }
