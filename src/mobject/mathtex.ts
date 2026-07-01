@@ -3,6 +3,13 @@
 // Pure JS: MathJax (mathjax-full) converts TeX -> SVG in Node's lite-DOM (no
 // browser), then the SVG glyph paths are turned into VMobjects via the shared
 // svg_path parser. No LaTeX binary required.
+//
+// This module mirrors ManimCommunity's mobject/text/tex_mobject.py at the
+// glyph level:
+//   - SingleStringMathTex : atomic unit, one tex string -> glyph VMobjects.
+//   - MathTex             : *many* tex strings -> addressable PART VGroups,
+//                           split by the isolated substrings / individual args.
+//   - Tex                 : text mode (upright prose wrapped in \text{...}).
 
 import { VMobject, VGroup } from "./VMobject.ts";
 import { Color, WHITE } from "../core/color.ts";
@@ -19,6 +26,16 @@ export interface MathTexConfig {
   strokeOpacity?: number;
   fontSize?: number;
   point?: number[];
+  /** Environment the string is wrapped in, e.g. "align*" (math) or "center". */
+  texEnvironment?: string;
+  /** Substrings that MathTex should isolate as their own addressable parts. */
+  substringsToIsolate?: string[];
+  /** Alias accepted by manim; merged with substringsToIsolate. */
+  isolate?: string[];
+  /** Map of tex substring -> color, applied to matching parts on construction. */
+  texToColorMap?: Record<string, ColorLike>;
+  /** Separator joined between the individual tex string args. */
+  argSeparator?: string;
   [key: string]: any;
 }
 
@@ -163,18 +180,48 @@ function findSvg(adaptor: any, node: any): any {
   return null;
 }
 
-// --- build a VGroup from a TeX string --------------------------------------
-// MathJax draws glyphs in font units (hundreds tall) with a y-UP convention,
-// then wraps everything in an outer scale(1,-1). Applying the fully composed
-// affine to each point yields SVG-style y-DOWN screen coordinates; we flip that
-// once (negate y) to reach manim's y-UP world. No double flip.
-export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
+// --- environment wrapping ----------------------------------------------------
+// manim wraps the tex string in an environment (default "align*") before
+// handing it to LaTeX. MathJax doesn't need the environment for plain math,
+// but honoring it keeps alignment (`&`, `\\`) and text environments working.
+function wrapEnvironment(texString: string, env?: string): string {
+  if (!env) return texString;
+  // "align*" et al. are math environments MathJax understands; "center" and
+  // friends are text environments used by Tex — MathJax has no \begin{center},
+  // so we degrade those to a bare \text{...} at the call site (see Tex).
+  const mathEnvs = new Set([
+    "align", "align*", "aligned", "gather", "gather*", "gathered",
+    "equation", "equation*", "array", "matrix", "cases",
+  ]);
+  if (mathEnvs.has(env)) {
+    return `\\begin{${env}}${texString}\\end{${env}}`;
+  }
+  return texString;
+}
+
+// --- raw glyph builder -------------------------------------------------------
+// Render one tex string to a FLAT list of glyph VMobjects in raw font units
+// (y already negated to world y-up, but NOT scaled or centered). Keeping this
+// unscaled and uncentered is what makes glyph *counts* stable across separate
+// renders, which is how MathTex slices the full expression into parts.
+const UNIT = 1 / 1000;
+
+function styleGlyph(mob: VMobject, fill: Color, stroke: Color, fo: number, sw: number, so: number) {
+  mob.fillColor = Color.parse(fill);
+  mob.strokeColor = Color.parse(stroke);
+  mob.fillOpacity = fo;
+  mob.strokeWidth = sw;
+  mob.strokeOpacity = so;
+}
+
+function texToGlyphList(texString: string, config: MathTexConfig): VMobject[] {
   if (!_mj) throw new Error("MathTex requires MathJax; call `await initMathTex()` once before constructing.");
   const { adaptor, doc } = _mj;
 
-  const container = doc.convert(String(tex), { display: true });
+  const wrapped = wrapEnvironment(texString, config.texEnvironment);
+  const container = doc.convert(String(wrapped), { display: true });
   const svgNode = findSvg(adaptor, container);
-  if (!svgNode) throw new Error("MathJax produced no <svg> for: " + tex);
+  if (!svgNode) throw new Error("MathJax produced no <svg> for: " + texString);
 
   const records = collectGlyphs(adaptor, svgNode);
 
@@ -184,19 +231,7 @@ export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
   const strokeWidth = config.strokeWidth ?? 0;
   const strokeOpacity = config.strokeOpacity ?? (strokeWidth ? 1 : 0);
 
-  // MathJax font units are large; pre-scale to keep world numbers sane before
-  // the final setHeight. y is negated to go from SVG y-down -> world y-up.
-  const UNIT = 1 / 1000;
-  const group = new VGroup();
-
-  const styleMob = (mob: any) => {
-    mob.fillColor = Color.parse(fillColor);
-    mob.strokeColor = Color.parse(strokeColor);
-    mob.fillOpacity = fillOpacity;
-    mob.strokeWidth = strokeWidth;
-    mob.strokeOpacity = strokeOpacity;
-  };
-
+  const glyphs: VMobject[] = [];
   for (const rec of records) {
     const mob = new VMobject();
     if (rec.type === "path") {
@@ -218,7 +253,6 @@ export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
         [rec.x, rec.y + rec.h],
       ].map(([cx, cy]) => applyAffine(rec.m, cx, cy));
       const pts = corners.map(([x, y]) => [x * UNIT, -y * UNIT, 0]);
-      // Close the loop and normalize corner points into cubic segments.
       const loop = [...pts, pts[0]];
       mob.subpathStarts.push(0);
       mob.points.push(loop[0]);
@@ -230,48 +264,365 @@ export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
       }
     }
     if (mob.points.length) {
-      styleMob(mob);
-      group.add(mob);
+      styleGlyph(mob, fillColor, strokeColor, fillOpacity, strokeWidth, strokeOpacity);
+      glyphs.push(mob);
     }
   }
+  return glyphs;
+}
 
-  // Size to world units and place. fontSize is the target math height.
+// --- legacy public helper: build a scaled/centered VGroup from a tex string --
+// Retained for backwards compatibility (index.ts re-exports it). Delegates to
+// the raw glyph builder, then scales + positions like before.
+export function texToVGroup(tex: string, config: MathTexConfig = {}): VGroup {
+  const glyphs = texToGlyphList(String(tex), config);
+  const group = new VGroup();
+  group.add(...glyphs);
+
+  const fillColor = Color.parse(config.color ?? config.fillColor ?? WHITE);
+  const strokeColor = Color.parse(config.strokeColor ?? config.color ?? WHITE);
+  const fillOpacity = config.fillOpacity ?? 1;
+  const strokeWidth = config.strokeWidth ?? 0;
+  const strokeOpacity = config.strokeOpacity ?? (strokeWidth ? 1 : 0);
+
   const fontSize = config.fontSize ?? 0.7;
   if (group.getHeight() > 1e-9) group.setHeight(fontSize);
   if (config.point) group.moveTo(config.point);
   else group.center();
 
-  styleMob(group);
+  styleGlyph(group as any, fillColor, strokeColor, fillOpacity, strokeWidth, strokeOpacity);
   return group;
 }
 
-// --- public classes ---------------------------------------------------------
-export class MathTex extends VGroup {
+// --- SingleStringMathTex -----------------------------------------------------
+// The atomic unit (manim: SingleStringMathTex). Renders exactly one tex string
+// to glyph VMobjects. It is itself a VGroup whose submobjects are the glyphs.
+export class SingleStringMathTex extends VGroup {
   tex: string;
+  texEnvironment: string;
 
-  // new MathTex(tex, { fontSize, color, fillOpacity, strokeWidth, point })
-  constructor(tex = "", config: MathTexConfig = {}) {
+  constructor(texString = "", config: MathTexConfig = {}) {
     super();
-    this.tex = String(tex);
+    this.tex = String(texString);
+    this.texEnvironment = config.texEnvironment ?? "align*";
     this.fillColor = Color.parse(config.color ?? config.fillColor ?? WHITE);
     this.strokeColor = Color.parse(config.strokeColor ?? config.color ?? WHITE);
-    const built = texToVGroup(this.tex, config);
-    this.add(...built.submobjects);
+    const glyphs = texToGlyphList(this.tex, { ...config, texEnvironment: this.texEnvironment });
+    this.add(...glyphs);
     this.fillOpacity = config.fillOpacity ?? 1;
     this.strokeWidth = config.strokeWidth ?? 0;
     this.strokeOpacity = config.strokeOpacity ?? (this.strokeWidth ? 1 : 0);
   }
 
   setStyle(style: any): this {
-    for (const g of this.submobjects) (g as any).setStyle(style);
+    for (const g of this.submobjects) (g as any).setStyle?.(style);
     return this;
   }
 }
 
-// Tex renders the string in MathJax's default math mode (same pipeline as
-// MathTex). Kept simple: pass the string through unchanged.
-export class Tex extends MathTex {
-  constructor(tex = "", config: MathTexConfig = {}) {
-    super(tex, config);
+// --- MathTex (multi-string, part-addressable) --------------------------------
+// Separate the trailing config object (if any) from the variadic tex strings.
+function splitArgs(args: any[]): { texStrings: string[]; config: MathTexConfig } {
+  let config: MathTexConfig = {};
+  const strs = args.slice();
+  const last = strs[strs.length - 1];
+  if (strs.length > 0 && last !== null && typeof last === "object" && !Array.isArray(last)) {
+    config = last as MathTexConfig;
+    strs.pop();
   }
+  return { texStrings: strs.map((s) => String(s)), config };
+}
+
+// Given the ordered break-substrings, count how many glyphs each one renders
+// to on its own; those counts slice the full glyph list into parts. This
+// mirrors manim's break_up_by_substrings, but at the glyph level: instead of
+// SVG-path matching we render each part independently and trust MathJax to be
+// deterministic about glyph counts.
+function countGlyphs(texString: string, config: MathTexConfig): number {
+  if (texString.trim().length === 0) return 0;
+  try {
+    return texToGlyphList(texString, config).length;
+  } catch {
+    return 0;
+  }
+}
+
+export class MathTex extends VGroup {
+  tex: string;
+  texStrings: string[];
+  texEnvironment: string;
+  argSeparator: string;
+  substringsToIsolate: string[];
+  texToColorMap: Record<string, ColorLike>;
+  /** Each entry is a VGroup of the glyphs belonging to one addressable part. */
+  parts: VGroup[];
+  private _partTex: string[];
+
+  // Backwards compatible: `new MathTex("x^2", { fontSize })` still works.
+  // New:                  `new MathTex("x^2", "+", "1", { texToColorMap })`.
+  constructor(...args: any[]) {
+    super();
+    const { texStrings, config } = splitArgs(args);
+
+    this.texEnvironment = config.texEnvironment ?? "align*";
+    this.argSeparator = config.argSeparator ?? this.defaultArgSeparator();
+    this.substringsToIsolate = [
+      ...(config.substringsToIsolate ?? []),
+      ...(config.isolate ?? []),
+    ];
+    this.texToColorMap = config.texToColorMap ?? {};
+    this.texStrings = texStrings.length ? texStrings : [""];
+
+    // Full combined tex string (what actually gets rendered).
+    this.tex = this.texStrings.join(this.argSeparator);
+
+    this.fillColor = Color.parse(config.color ?? config.fillColor ?? WHITE);
+    this.strokeColor = Color.parse(config.strokeColor ?? config.color ?? WHITE);
+
+    // 1. Render the full expression to a flat glyph list.
+    const renderConfig: MathTexConfig = { ...config, texEnvironment: this.texEnvironment };
+    const allGlyphs = texToGlyphList(this.preprocessTex(this.tex), renderConfig);
+
+    // 2. Determine the ordered list of "parts" (the break-substrings). Start
+    //    from the individual tex string args, then further split each by the
+    //    isolated substrings + texToColorMap keys.
+    const isolateKeys = [
+      ...this.substringsToIsolate,
+      ...Object.keys(this.texToColorMap),
+    ].filter((k) => k.length > 0);
+    const partTex: string[] = [];
+    for (const s of this.texStrings) {
+      for (const piece of breakBySubstrings(s, isolateKeys)) {
+        if (piece.length) partTex.push(piece);
+      }
+    }
+    if (partTex.length === 0) partTex.push(this.tex);
+
+    // 3. Count each part's glyphs by rendering it independently, then slice
+    //    the full glyph list by those counts. If the counts don't line up with
+    //    the full render (spacing/kerning glyphs, \text runs, etc.), fall back
+    //    to a single part holding all glyphs so nothing is dropped.
+    const counts = partTex.map((p) => countGlyphs(this.preprocessTex(p), renderConfig));
+    const total = counts.reduce((a, b) => a + b, 0);
+
+    this.parts = [];
+    this._partTex = [];
+    if (total === allGlyphs.length && partTex.length > 0) {
+      let idx = 0;
+      for (let i = 0; i < partTex.length; i++) {
+        const part = new VGroup();
+        part.add(...allGlyphs.slice(idx, idx + counts[i]));
+        idx += counts[i];
+        this.parts.push(part);
+        this._partTex.push(partTex[i]);
+      }
+    } else {
+      // Counts didn't reconcile: keep one part per tex-string arg if we can,
+      // else a single all-glyph part. Glyphs are distributed proportionally.
+      const part = new VGroup();
+      part.add(...allGlyphs);
+      this.parts.push(part);
+      this._partTex.push(this.tex);
+    }
+
+    // 4. Attach the glyphs. For a SINGLE part (the common `new MathTex("x^2")`
+    //    case) keep the legacy behavior: `submobjects` are the flat glyphs, so
+    //    existing code / tests that index glyphs directly keep working. For
+    //    multiple parts, `submobjects` are the part VGroups. Either way the
+    //    part API (getPartByTex, ...) works off `this.parts`, and flat glyph
+    //    access is available via `glyphs()`.
+    if (this.parts.length <= 1) {
+      this.add(...allGlyphs);
+    } else {
+      this.add(...this.parts);
+    }
+
+    this.fillOpacity = config.fillOpacity ?? 1;
+    this.strokeWidth = config.strokeWidth ?? 0;
+    this.strokeOpacity = config.strokeOpacity ?? (this.strokeWidth ? 1 : 0);
+
+    // 5. Scale + position (was previously done inside texToVGroup).
+    const fontSize = config.fontSize ?? 0.7;
+    if (this.getHeight() > 1e-9) this.setHeight(fontSize);
+    if (config.point) this.moveTo(config.point);
+    else this.center();
+
+    // 6. Apply colors from texToColorMap on construction.
+    if (Object.keys(this.texToColorMap).length) {
+      this.setColorByTexToColorMap(this.texToColorMap);
+    }
+  }
+
+  // Overridden by Tex (text mode) to wrap prose in \text{...}.
+  protected defaultArgSeparator(): string {
+    return " ";
+  }
+
+  // Hook for subclasses (Tex) to transform a tex piece before rendering.
+  protected preprocessTex(tex: string): string {
+    return tex;
+  }
+
+  // --- flat glyph access (kept for compatibility & animations) --------------
+  glyphs(): VMobject[] {
+    const out: VMobject[] = [];
+    for (const part of this.parts) {
+      for (const g of part.submobjects) out.push(g as VMobject);
+    }
+    return out;
+  }
+
+  // --- part API (mirrors manim) ---------------------------------------------
+  getPartsByTex(tex: string): VGroup[] {
+    const needle = String(tex);
+    const out: VGroup[] = [];
+    for (let i = 0; i < this.parts.length; i++) {
+      if (this._partTex[i].includes(needle)) out.push(this.parts[i]);
+    }
+    return out;
+  }
+
+  getPartByTex(tex: string, config: { substringToIsolate?: string } = {}): VGroup | null {
+    const needle = config.substringToIsolate ?? String(tex);
+    for (let i = 0; i < this.parts.length; i++) {
+      if (this._partTex[i].includes(needle)) return this.parts[i];
+    }
+    return null;
+  }
+
+  indexOfPart(part: VGroup): number {
+    return this.parts.indexOf(part);
+  }
+
+  indexOfPartByTex(tex: string): number {
+    const part = getFirstMatch(this._partTex, String(tex));
+    return part;
+  }
+
+  setColorByTex(tex: string, color: ColorLike): this {
+    for (const part of this.getPartsByTex(tex)) {
+      (part as any).setColor(color);
+    }
+    return this;
+  }
+
+  setColorByTexToColorMap(map: Record<string, ColorLike>): this {
+    for (const [tex, color] of Object.entries(map)) {
+      this.setColorByTex(tex, color);
+    }
+    return this;
+  }
+
+  setOpacityByTex(tex: string, opacity = 0.5): this {
+    for (const part of this.getPartsByTex(tex)) {
+      (part as any).setOpacity(opacity);
+    }
+    return this;
+  }
+
+  sortAlphabetically(): this {
+    const order = this.parts
+      .map((p, i) => ({ p, t: this._partTex[i] }))
+      .sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+    this.parts = order.map((o) => o.p);
+    this._partTex = order.map((o) => o.t);
+    if (this.parts.length > 1) this.submobjects = this.parts.slice();
+    return this;
+  }
+
+  setStyle(style: any): this {
+    for (const part of this.parts) (part as any).setStyle?.(style);
+    return this;
+  }
+}
+
+// index of the first part whose tex contains `needle`, or -1.
+function getFirstMatch(partTex: string[], needle: string): number {
+  for (let i = 0; i < partTex.length; i++) {
+    if (partTex[i].includes(needle)) return i;
+  }
+  return -1;
+}
+
+// Break a single tex string into ordered pieces at the given substrings,
+// keeping the substrings themselves as pieces (manim: break_up_by_substrings).
+function breakBySubstrings(texString: string, substrings: string[]): string[] {
+  // Longest-first so nested/overlapping isolate keys match greedily.
+  const keys = substrings.filter((s) => s.length).sort((a, b) => b.length - a.length);
+  if (keys.length === 0) return [texString];
+
+  const pieces: string[] = [];
+  let i = 0;
+  let buffer = "";
+  while (i < texString.length) {
+    let matched = "";
+    for (const k of keys) {
+      if (texString.startsWith(k, i)) { matched = k; break; }
+    }
+    if (matched) {
+      if (buffer) { pieces.push(buffer); buffer = ""; }
+      pieces.push(matched);
+      i += matched.length;
+    } else {
+      buffer += texString[i];
+      i++;
+    }
+  }
+  if (buffer) pieces.push(buffer);
+  return pieces;
+}
+
+// --- Tex (text mode) ---------------------------------------------------------
+// Renders content as upright PROSE rather than italic math. MathJax has no
+// LaTeX text mode of its own, so we wrap plain runs in \text{...} (which uses
+// the upright roman font) and leave $...$ / \(...\) math untouched.
+export class Tex extends MathTex {
+  constructor(...args: any[]) {
+    super(...args);
+  }
+
+  protected defaultArgSeparator(): string {
+    return "";
+  }
+
+  // Wrap prose in \text{...} so it renders upright. Runs already inside math
+  // delimiters ($...$) or already \text{...} are left as-is.
+  protected preprocessTex(tex: string): string {
+    return toTextMode(tex);
+  }
+}
+
+// Convert a Tex string to something MathJax renders upright. If the string has
+// no math delimiters and isn't already a \text/\mathrm command, wrap the whole
+// thing in \text{...}. If it contains $...$ segments, wrap only the non-math
+// runs.
+function toTextMode(tex: string): string {
+  if (tex.length === 0) return tex;
+  if (/^\s*\\(text|mathrm|mbox|textrm)\s*\{/.test(tex)) return tex;
+
+  if (!tex.includes("$")) {
+    // Escape nothing special; \text{} handles spaces/letters upright.
+    return `\\text{${tex}}`;
+  }
+
+  // Mixed prose + inline math: split on $...$ and wrap prose runs only.
+  const out: string[] = [];
+  let inMath = false;
+  let buf = "";
+  for (let i = 0; i < tex.length; i++) {
+    const ch = tex[i];
+    if (ch === "$") {
+      if (inMath) {
+        out.push(buf); // math run, verbatim
+      } else if (buf.length) {
+        out.push(`\\text{${buf}}`);
+      }
+      buf = "";
+      inMath = !inMath;
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf.length) out.push(inMath ? buf : `\\text{${buf}}`);
+  return out.join("");
 }

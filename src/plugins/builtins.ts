@@ -25,6 +25,11 @@ import * as surface from "../mobject/surface.ts";
 import * as coords from "../mobject/coordinate_systems.ts";
 import * as valueTracker from "../mobject/value_tracker.ts";
 import * as textMod from "../mobject/text/Text.ts";
+import * as paragraphMod from "../mobject/text/paragraph.ts";
+import * as texExtrasMod from "../mobject/text/tex_extras.ts";
+import * as codeMod from "../mobject/text/code.ts";
+import * as variableMod from "../mobject/text/variable.ts";
+import * as numbersAnim from "../animation/numbers.ts";
 import * as vtextMod from "../mobject/vectorized_text.ts";
 import * as mathtexMod from "../mobject/mathtex.ts";
 import * as svgMod from "../mobject/svg_mobject.ts";
@@ -47,7 +52,7 @@ export function registerBuiltins(): typeof registry {
 
   const mobjectModules = [geometry, tips, arcs, polygram, shapeMatchers, vectors,
     labeled, booleanOps, matrix, table, brace, graph, surface, coords,
-    valueTracker, textMod, vtextMod, mathtexMod, svgMod, imageMod, threeDMod];
+    valueTracker, textMod, paragraphMod, texExtrasMod, codeMod, variableMod, vtextMod, mathtexMod, svgMod, imageMod, threeDMod];
   for (const mod of mobjectModules) {
     for (const [name, value] of Object.entries(mod)) {
       if (isSubclassOf(value, Mobject)) registry.registerMobject(name, value);
@@ -55,7 +60,7 @@ export function registerBuiltins(): typeof registry {
     }
   }
 
-  const animationModules = [animationMod, extra, composition];
+  const animationModules = [animationMod, extra, composition, numbersAnim];
   for (const mod of animationModules) {
     for (const [name, value] of Object.entries(mod)) {
       if (isSubclassOf(value, Animation)) registry.registerAnimation(name, value);

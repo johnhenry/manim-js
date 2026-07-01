@@ -2,7 +2,7 @@
 // interpolate machinery tweens it). DecimalNumber/Integer render a live number.
 
 import { Mobject } from "./Mobject.ts";
-import { Text } from "./text/Text.ts";
+import { RasterText } from "./text/Text.ts";
 import type { Vec3 } from "../core/types.ts";
 
 /** Config accepted by DecimalNumber/Integer (extends Text's config loosely). */
@@ -46,7 +46,7 @@ export class ValueTracker extends Mobject {
   }
 }
 
-export class DecimalNumber extends Text {
+export class DecimalNumber extends RasterText {
   numDecimalPlaces: number;
   unit: string;
   includeSign: boolean;
