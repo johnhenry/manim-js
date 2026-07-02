@@ -5,8 +5,8 @@
 
 /// <reference types="node" />
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // Start an ffmpeg process reading PNGs from stdin (image2pipe) and encoding to
 // `outPath`. Codec/pixel-format is chosen by `format` ("webm" | "gif" | "mov" |
@@ -97,4 +97,115 @@ export async function concatPartials(partials: string[], outPath: string, verbos
 export async function remuxCopy(src: string, outPath: string, verbose: boolean): Promise<void> {
   const ok = await runFfmpeg(["-y", "-i", src, "-c", "copy", outPath], verbose);
   if (!ok) await runFfmpeg(["-y", "-i", src, outPath], verbose, true);
+}
+
+// --- Video input probing / frame extraction (for VideoMobject; see video-node.ts) ---
+
+// Metadata about a source clip, as returned by ffprobe.
+export interface ProbeResult {
+  duration: number;   // seconds
+  width: number;      // px
+  height: number;     // px
+  fps: number;        // frames per second (avg_frame_rate, resolved from a fraction)
+  hasAudio: boolean;  // true if the file carries at least one audio stream
+}
+
+// Parse a possibly-fractional rate string like "30000/1001" or "30/1" or "25".
+// Returns 0 for empty / "0/0" so callers can fall back to a default.
+function parseRate(s: string | undefined): number {
+  if (!s) return 0;
+  const m = String(s).split("/");
+  if (m.length === 2) {
+    const num = Number(m[0]);
+    const den = Number(m[1]);
+    if (!den || !Number.isFinite(num) || !Number.isFinite(den)) return 0;
+    return num / den;
+  }
+  const v = Number(s);
+  return Number.isFinite(v) ? v : 0;
+}
+
+// Probe a media file with ffprobe, returning duration/dimensions/fps/hasAudio.
+// Uses `-show_streams -show_format -of json` and reads the first video stream
+// for geometry/fps; duration prefers format.duration, then the video stream's.
+export function probeVideo(path: string): Promise<ProbeResult> {
+  return new Promise<ProbeResult>((res, rej) => {
+    const args = ["-v", "error", "-show_streams", "-show_format", "-of", "json", path];
+    const pf = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    pf.stdout.on("data", (d) => (out += d));
+    pf.stderr.on("data", (d) => (err += d));
+    pf.on("error", rej);
+    pf.on("close", (code: number) => {
+      if (code !== 0) return rej(new Error("ffprobe exited " + code + (err ? ": " + err : "")));
+      let json: any;
+      try {
+        json = JSON.parse(out);
+      } catch (e: any) {
+        return rej(new Error("ffprobe: unparseable JSON: " + e.message));
+      }
+      const streams: any[] = json.streams ?? [];
+      const video = streams.find((s) => s.codec_type === "video");
+      const hasAudio = streams.some((s) => s.codec_type === "audio");
+      if (!video) return rej(new Error("ffprobe: no video stream in " + path));
+
+      const width = Number(video.width) || 0;
+      const height = Number(video.height) || 0;
+      // Prefer avg_frame_rate; fall back to r_frame_rate; then 0 (caller defaults).
+      const fps = parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate) || 0;
+      // Duration: format-level is most reliable across containers; then stream.
+      const duration =
+        Number(json.format?.duration) ||
+        Number(video.duration) ||
+        0;
+
+      res({ duration, width, height, fps, hasAudio });
+    });
+  });
+}
+
+// Extract numbered PNG frames from `path` into `opts.dir` at `opts.fps`. Optional
+// `scale` ([w,h] or a single width, height auto with -1) applies a scale filter;
+// `start`/`end` trim via -ss/-to (input-side -ss for speed, output-side -to).
+// Returns the sorted list of written PNG paths.
+//
+// Frames are named frame_000001.png, frame_000002.png, … (ffmpeg's %06d, 1-based).
+export async function extractFrames(
+  path: string,
+  opts: { fps: number; scale?: [number, number] | number; dir: string; start?: number; end?: number; verbose?: boolean },
+): Promise<string[]> {
+  const { fps, scale, dir, start, end } = opts;
+  mkdirSync(dir, { recursive: true });
+
+  const filters: string[] = [`fps=${fps}`];
+  if (scale != null) {
+    if (Array.isArray(scale)) filters.push(`scale=${scale[0]}:${scale[1]}`);
+    else filters.push(`scale=${scale}:-1`);
+  }
+
+  const args: string[] = ["-y"];
+  // Input-side seek is fast (keyframe-accurate). For frame-accuracy we let the
+  // fps filter resample, which is deterministic for a given (start, fps).
+  if (start != null && start > 0) args.push("-ss", String(start));
+  args.push("-i", path);
+  if (end != null) {
+    // -to is relative to the (already -ss'd) input timeline in modern ffmpeg when
+    // -ss precedes -i; pass the clip end minus start as duration to be safe.
+    const dur = start != null && start > 0 ? Math.max(0, end - start) : end;
+    args.push("-t", String(dur));
+  }
+  args.push("-vf", filters.join(","));
+  // Deterministic PNGs (no timestamps embedded) so content hashing is stable.
+  args.push("-vsync", "0", "-frame_pts", "0");
+  const pattern = join(dir, "frame_%06d.png");
+  args.push(pattern);
+
+  await runFfmpeg(args, opts.verbose === true, true);
+
+  // Collect + sort the written PNGs.
+  const files = readdirSync(dir)
+    .filter((f) => /^frame_\d+\.png$/.test(f))
+    .sort();
+  return files.map((f) => join(dir, f));
 }

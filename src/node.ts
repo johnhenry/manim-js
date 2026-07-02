@@ -24,6 +24,11 @@ export type { SegmentRecord } from "./scene/render_frame.ts";
 export { renderGL } from "./node-gl.ts";
 export type { RenderGLOptions } from "./node-gl.ts";
 export { probeCDP, connectCDP } from "./renderer/cdp.ts";
+// VideoMobject (Node): ffmpeg-backed frame extraction + decode cache.
+export { loadVideo } from "./video-node.ts";
+export type { LoadVideoOptions } from "./video-node.ts";
+export { probeVideo, extractFrames } from "./renderer/ffmpeg.ts";
+export type { ProbeResult } from "./renderer/ffmpeg.ts";
 
 // Options accepted by render(). All fields are optional; sensible defaults are
 // applied inside the function.

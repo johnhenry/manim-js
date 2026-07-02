@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.4.0 — VideoMobject (external-video ingestion)
+
+Place an external video clip inside a scene. `VideoMobject` is an `ImageMobject`
+whose bitmap is swapped per scene frame to the clip's frame for the current time,
+so it plays through `play()`/`wait()` and stays in sync with scene time. See
+[docs/video.md](docs/video.md).
+
+- **Isomorphic core** (`VideoMobject`, `VideoFrameProvider`): the class depends
+  only on a small sync `frameAt(t)` provider interface; each backend supplies a
+  provider. Frame-accurate by construction (exact frame extraction, not
+  `<video>` keyframe seeking). Deterministic `dt` accumulation, so it composes
+  with the partial-movie cache and `renderParallel`.
+- **Node** (`loadVideo`): frames extracted with ffmpeg into a content-hash decode
+  cache, pre-decoded to memory for O(1) sync lookup. Optional **audio
+  ingestion** — the clip's audio track is muxed into the render via the existing
+  `scene.addSound` path (output carries both video + audio). Also exports
+  `probeVideo` / `extractFrames`.
+- **Browser** (`loadVideo`): a `precapture` provider (dependency-free,
+  frame-accurate — seeks a `<video>` and captures each frame to an `ImageBitmap`)
+  and a `live` provider (real-time `<video>` passthrough). Node-import-safe; a
+  WebCodecs path is noted as a future upgrade.
+
+New example `examples/video.ts` (synthesizes its own clip). 34 new tests
+(488 total); type-clean; Node path verified end-to-end (rendered mp4 carrying
+both h264 video and muxed aac audio).
+
 ## 1.3.0 — alternate renderers
 
 Two opt-in render targets that share the same backend-agnostic scene graph. The

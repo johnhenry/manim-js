@@ -167,6 +167,7 @@ Render any of these with `node examples/<name>.ts` (writes to `examples/out/`):
 | `examples/interpenetrate.ts` | z-buffer vs painter sorting on a sphere through a plane |
 | `examples/smooth.ts` | smooth (Gouraud) vs flat shading on spheres + a torus |
 | `examples/media.ts` | ImageMobject + SVGMobject + sound (MP4 with an audio track) |
+| `examples/video.ts` | VideoMobject — ingest an external clip (frames + audio), play it in-scene ([docs/video.md](docs/video.md)) |
 | `examples/svg-output.ts` | vector output — a single `.svg` + a numbered `.svg` sequence (`format: "svg"`) |
 | `examples/render-gl.ts` | opt-in headless GPU render via `renderGL` (needs a CDP Chrome; see docs/renderers.md) |
 | `examples/browser/index.html` | browser Canvas-2D backend (live + WebM export) |
