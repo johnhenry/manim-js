@@ -43,7 +43,9 @@ const res = await runFormat("explainer", {
       },
     ],
     outro: "github.com/johnhenry/manim-js",
-    tts: process.env.OPENAI_API_KEY ? "openai" : "silent",
+    // Prefer OpenAI TTS when a key is present, else local espeak-ng ("system");
+    // resolveTTSProvider falls back to "silent" if neither is available.
+    tts: process.env.OPENAI_API_KEY ? "openai" : "system",
     renderOptions: {
       output: "examples/out/manim-js-explainer.mp4",
       quality: "medium",
