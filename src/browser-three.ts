@@ -11,6 +11,7 @@ import { ThreeRenderer } from "./renderer/ThreeRenderer.ts";
 import { Camera } from "./renderer/CanvasRenderer.ts";
 import { ThreeDCamera } from "./scene/three_d.ts";
 import { Scene } from "./scene/Scene.ts";
+import { makeScene, runConstruct } from "./scene/orchestrate.ts";
 import { QUALITIES } from "./index.ts";
 
 export * from "./index.ts";
@@ -38,18 +39,7 @@ async function loadThree(options: ThreeOptions): Promise<any> {
   return options.three ?? (await import("three"));
 }
 
-function makeScene(sceneOrConstruct: any, config: any) {
-  if (sceneOrConstruct.prototype instanceof Scene) return new sceneOrConstruct(config);
-  return new Scene(config);
-}
 
-async function runConstruct(sceneOrConstruct: any, scene: any) {
-  if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
-    await sceneOrConstruct(scene);
-  } else {
-    await scene.render();
-  }
-}
 
 function resolveCamera(options: ThreeOptions, pixelWidth: number, pixelHeight: number, background: string): any {
   let camera = options.camera;

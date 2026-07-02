@@ -14,6 +14,7 @@
 
 import { Camera, CanvasRenderer } from "./renderer/CanvasRenderer.ts";
 import { Scene } from "./scene/Scene.ts";
+import { makeScene, runConstruct } from "./scene/orchestrate.ts";
 
 // Quality presets (kept local so this module has no dependency on index.ts,
 // which pulls in the full library graph — the Player is meant to be small and
@@ -106,22 +107,7 @@ async function snapshot(canvas: any, ctx: any, width: number, height: number): P
   }
 }
 
-function makeScene(sceneOrConstruct: any, config: any): Scene {
-  if (typeof sceneOrConstruct === "function" && sceneOrConstruct.prototype instanceof Scene) {
-    return new sceneOrConstruct(config);
-  }
-  return new Scene(config);
-}
 
-async function runConstruct(sceneOrConstruct: any, scene: Scene): Promise<void> {
-  if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
-    // A bare construct function: fn(scene) => Promise
-    await (sceneOrConstruct as any)(scene);
-    scene.finalizeSections();
-  } else {
-    await scene.render();
-  }
-}
 
 export class Player {
   /** All recorded frames, in order. Index === frame number. */

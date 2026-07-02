@@ -4,6 +4,7 @@
 
 import { Camera, CanvasRenderer } from "./renderer/CanvasRenderer.ts";
 import { Scene } from "./scene/Scene.ts";
+import { makeScene, runConstruct } from "./scene/orchestrate.ts";
 import { QUALITIES } from "./index.ts";
 
 // GIF/MP4 encoders. These are plain, browser-safe ESM/CJS modules, so importing
@@ -49,18 +50,7 @@ export interface BrowserOptions {
   [key: string]: any;
 }
 
-function makeScene(sceneOrConstruct: any, config: any) {
-  if (sceneOrConstruct.prototype instanceof Scene) return new sceneOrConstruct(config);
-  return new Scene(config);
-}
 
-async function runConstruct(sceneOrConstruct: any, scene: any) {
-  if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
-    await sceneOrConstruct(scene);
-  } else {
-    await scene.render();
-  }
-}
 
 // Play a scene live on a canvas element at real-time speed.
 //   await play(MyScene, { canvas, quality: "medium" })

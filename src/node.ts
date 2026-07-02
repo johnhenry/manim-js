@@ -8,6 +8,7 @@ import { dirname, resolve, join, basename } from "node:path";
 import { Camera, CanvasRenderer } from "./renderer/CanvasRenderer.ts";
 import { autoRegisterFonts, loadVectorFont } from "./renderer/fonts-node.ts";
 import { Scene } from "./scene/Scene.ts";
+import { makeScene, runConstruct } from "./scene/orchestrate.ts";
 import { QUALITIES } from "./index.ts";
 import { config as manimConfig, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_config.ts";
 import { startFfmpeg, writeToStream, encodeFrames, runFfmpeg, concatPartials, remuxCopy } from "./renderer/ffmpeg.ts";
@@ -194,9 +195,7 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
   const outPath = resolve(output);
   mkdirSync(dirname(outPath), { recursive: true });
 
-  const scene = sceneOrConstruct.prototype instanceof Scene
-    ? new sceneOrConstruct({ fps, camera })
-    : new Scene({ fps, camera });
+  const scene = makeScene(sceneOrConstruct, { fps, camera });
 
   // Range filtering (from/upto animation number). When active we mark segments
   // outside the range as skipped so their frames are not emitted, but time still
@@ -399,15 +398,6 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
   return { output: outPath, frames: emitted, fps, pixelWidth, pixelHeight, sounds: scene.sounds?.length ?? 0, sections: scene.sections };
 }
 
-// Run a Scene subclass's construct() (or a plain construct function).
-async function runConstruct(sceneOrConstruct: any, scene: Scene): Promise<void> {
-  if (typeof sceneOrConstruct === "function" && !(sceneOrConstruct.prototype instanceof Scene)) {
-    await sceneOrConstruct(scene);
-    scene.finalizeSections();
-  } else {
-    await scene.render();
-  }
-}
 
 /** Delete the partial-movie-file cache directory next to an output path. */
 export function flushCache(outputOrDir: string): void {
