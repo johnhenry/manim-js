@@ -75,6 +75,8 @@ export * from "./mobject/graphing_scale.ts";
 export { ValueTracker, DecimalNumber, Integer, alwaysRedraw } from "./mobject/value_tracker.ts";
 
 export { CanvasRenderer, Camera } from "./renderer/CanvasRenderer.ts";
+export { SVGRenderer, mobjectsToSVG } from "./renderer/SVGRenderer.ts";
+export type { SVGRenderOptions } from "./renderer/SVGRenderer.ts";
 export { Scene } from "./scene/Scene.ts";
 
 export {

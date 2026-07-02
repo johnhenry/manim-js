@@ -100,7 +100,7 @@ See `examples/browser/index.html` for a full page and
 | Entry point | Target | Output | Notes |
 |-------------|--------|--------|-------|
 | `manim-js` | isomorphic core | — | all mobjects/animations/scenes/colors + the plugin API; no renderer glue |
-| `manim-js/node` | Node.js | mp4, webm, gif, mov, png-sequence, png | `@napi-rs/canvas` → PNG frames piped to `ffmpeg`; partial-movie caching + sections |
+| `manim-js/node` | Node.js | mp4, webm, gif, mov, png-sequence, png, **svg** | `@napi-rs/canvas` → PNG frames piped to `ffmpeg`; partial-movie caching + sections |
 | `manim-js/browser` | browser (Canvas-2D) | live `<canvas>` + WebM | `play()` for real-time, `record()` → WebM `Blob` via `MediaRecorder` |
 | `manim-js/browser-three` | browser (WebGL) | live `<canvas>` + WebM | Three.js: hardware depth buffer, MSAA, OrbitControls; same `play`/`record` API |
 
@@ -108,6 +108,18 @@ The Canvas-2D CPU backend is the default and the only one needed for headless
 Node video. The Three.js backend is a browser-only GPU accelerator that swaps
 only the draw step (fills → vertex-colored meshes, strokes → line segments, text
 → billboards). Architecture details: [docs/architecture.md](docs/architecture.md).
+
+Two **alternate render targets** share the same scene graph — see
+[docs/renderers.md](docs/renderers.md):
+
+- **SVG / vector output** (`format: "svg"`, or the isomorphic `SVGRenderer` /
+  `mobjectsToSVG`): resolution-independent, tiny, editable frames. Deterministic,
+  no GPU, no browser. `render(Scene, { format: "svg" })` writes a single `.svg`
+  (with `saveLastFrame`) or a numbered `.svg` sequence.
+- **Opt-in headless GPU** (`renderGL`, Node): renders the Three.js/WebGL backend
+  inside a CDP-accessible Chrome (real per-pixel lighting, MSAA, GPU strokes),
+  headless with no physical GPU (Mesa llvmpipe). Non-deterministic vs. the CPU
+  path, so it stays out of the content-hash cache.
 
 ## CLI
 
@@ -155,6 +167,8 @@ Render any of these with `node examples/<name>.ts` (writes to `examples/out/`):
 | `examples/interpenetrate.ts` | z-buffer vs painter sorting on a sphere through a plane |
 | `examples/smooth.ts` | smooth (Gouraud) vs flat shading on spheres + a torus |
 | `examples/media.ts` | ImageMobject + SVGMobject + sound (MP4 with an audio track) |
+| `examples/svg-output.ts` | vector output — a single `.svg` + a numbered `.svg` sequence (`format: "svg"`) |
+| `examples/render-gl.ts` | opt-in headless GPU render via `renderGL` (needs a CDP Chrome; see docs/renderers.md) |
 | `examples/browser/index.html` | browser Canvas-2D backend (live + WebM export) |
 | `examples/browser-three/index.html` | browser WebGL/Three.js backend (+ "Explore" orbit mode) |
 | `examples/plugins/heart-plugin.ts` | native `use()` plugin |

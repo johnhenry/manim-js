@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0 — alternate renderers
+
+Two opt-in render targets that share the same backend-agnostic scene graph. The
+CPU Canvas-2D rasterizer stays the default (its determinism underpins the
+content-hash cache); see [docs/renderers.md](docs/renderers.md).
+
+- **SVG / vector output** (`SVGRenderer`, `mobjectsToSVG`, and Node
+  `format: "svg"`). A second render backend that emits an SVG document per frame
+  — VMobjects → `<path>` cubic Béziers, raster `Text` → `<text>`, `ImageMobject`
+  → `<image>` — projected through the exact same `camera.toPixel` as the canvas,
+  so geometry matches pixel-for-pixel but is resolution-independent, tiny, and
+  editable. `render(Scene, { format: "svg" })` writes a single `.svg` (with
+  `saveLastFrame`) or a numbered sequence. Deterministic, no GPU, no browser. 3D
+  is a documented painter's-order vector approximation (no per-pixel z-buffer).
+- **Opt-in headless GPU** (`renderGL`, Node). Renders the existing Three.js/WebGL
+  backend inside a CDP-accessible headless Chrome (WebGL2 via Mesa llvmpipe — no
+  physical GPU) and captures the video back to disk, giving real per-pixel
+  lighting, MSAA, and GPU strokes. Zero-dependency CDP client (Node global
+  `fetch`/`WebSocket`); reuses `browser-three`'s `record()` and the shared
+  ffmpeg helpers for webm→mp4/mov. Non-deterministic vs. the CPU path, so it
+  stays out of the partial-movie cache. Also exports `probeCDP`/`connectCDP`.
+
+New examples: `examples/svg-output.ts`, `examples/render-gl.ts` (+ the
+browser-importable `examples/scenes/gl-demo-scene.ts`). 19 new tests (473 total);
+type-clean; both paths verified end-to-end (SVG on disk; GL via live headless
+Chrome producing valid H.264/VP9).
+
 ## 1.2.0 — Remotion-inspired features
 
 Eight features borrowed from studying [Remotion](https://www.remotion.dev)'s

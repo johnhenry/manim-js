@@ -19,6 +19,11 @@ export { config, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_confi
 export { renderParallel, renderSegmentRange } from "./node-parallel.ts";
 export { discoverSegments, partitionSegments } from "./scene/render_frame.ts";
 export type { SegmentRecord } from "./scene/render_frame.ts";
+// Opt-in headless GPU/WebGL rendering (drives the Three.js backend inside a
+// CDP-accessible Chrome; see docs/renderers.md).
+export { renderGL } from "./node-gl.ts";
+export type { RenderGLOptions } from "./node-gl.ts";
+export { probeCDP, connectCDP } from "./renderer/cdp.ts";
 
 // Options accepted by render(). All fields are optional; sensible defaults are
 // applied inside the function.
@@ -159,6 +164,34 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
       const above = uptoNum != null && rec.index > uptoNum;
       return (below || above) ? { skip: true } : undefined;
     };
+  }
+
+  // --- svg: emit resolution-independent vector output. With saveLastFrame a
+  //     single .svg; otherwise a numbered .svg sequence. Uses the SVGRenderer
+  //     (same camera projection as canvas). See docs/renderers.md. ---
+  if (format === "svg") {
+    const { SVGRenderer } = await import("./renderer/SVGRenderer.ts");
+    const svg = new SVGRenderer(camera, { background: transparent ? null : (background as string) });
+    if (saveLastFrame) {
+      const svgPath = outPath.replace(/\.[^.]+$/, "") + ".svg";
+      let last = "";
+      scene.frameHandler = async (mobjects) => { last = svg.renderToString(mobjects); };
+      await runConstruct(sceneOrConstruct, scene);
+      if (!last) last = svg.renderToString(scene.mobjects);
+      writeFileSync(svgPath, last);
+      if (verbose) console.log(`✓ Saved SVG -> ${svgPath}`);
+      return { output: svgPath, frames: 1, fps, pixelWidth, pixelHeight, sounds: scene.sounds?.length ?? 0, lastFrame: true };
+    }
+    const frameDir = outPath.replace(/\.[^.]+$/, "") + "_svg";
+    mkdirSync(frameDir, { recursive: true });
+    let frameIndex = 0, emitted = 0;
+    scene.frameHandler = async (mobjects) => {
+      emitted++;
+      writeFileSync(`${frameDir}/frame_${String(frameIndex++).padStart(6, "0")}.svg`, svg.renderToString(mobjects));
+    };
+    await runConstruct(sceneOrConstruct, scene);
+    if (verbose) console.log(`✓ Wrote ${emitted} SVG frames -> ${frameDir}`);
+    return { output: frameDir, frames: emitted, fps, pixelWidth, pixelHeight, sounds: scene.sounds?.length ?? 0 };
   }
 
   // --- saveLastFrame: render everything, keep only the final drawn frame, write
