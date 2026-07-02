@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.0 — adoption phase 3: voiceover / TTS-synced narration
+
+- **`voiceover(scene, text, callback, opts)`** (manim-voiceover style): synthesize
+  narration, mux it at the current scene time, and get a **tracker** whose
+  `.duration` you feed into `play({runTime})` so animations stretch to the speech.
+  Inline `<bookmark mark="name"/>` tags + `tracker.waitUntilBookmark("name")`
+  trigger animations at specific words. `parseBookmarks` exported.
+- **TTS provider abstraction** (`registerTTSProvider`/`resolveTTSProvider`): built-in
+  `silent` (no key — a silent clip of the estimated duration, for timing/offline),
+  `system` (macOS `say` / Linux espeak), and `openai`/`elevenlabs` HTTP adapters
+  (used only when an API key is present). Register your own.
+
+5 new tests (554 total); type-clean; example `examples/voiceover.ts` (bookmark-synced,
+runs with the no-key `silent` provider) + docs.
+
 ## 1.8.0 — adoption phase 2: captions + audio-reactive
 
 - **Captions** (`parseSrt`/`serializeSrt`, `createTikTokStyleCaptions`,

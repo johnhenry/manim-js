@@ -29,6 +29,14 @@ export { loadVideo } from "./video-node.ts";
 export type { LoadVideoOptions } from "./video-node.ts";
 export { probeVideo, extractFrames } from "./renderer/ffmpeg.ts";
 export type { ProbeResult } from "./renderer/ffmpeg.ts";
+// Voiceover / TTS-synced narration (Phase 3).
+export { voiceover, parseBookmarks, VoiceoverTracker } from "./voiceover/voiceover.ts";
+export type { VoiceoverOptions, Bookmark } from "./voiceover/voiceover.ts";
+export {
+  registerTTSProvider, getTTSProvider, listTTSProviders, resolveTTSProvider,
+  audioDurationSeconds, silentProvider, systemProvider, openaiProvider, elevenLabsProvider,
+} from "./voiceover/providers.ts";
+export type { TTSProvider, TTSResult, TTSSynthesizeOptions, WordBoundary } from "./voiceover/providers.ts";
 
 // Options accepted by render(). All fields are optional; sensible defaults are
 // applied inside the function.
