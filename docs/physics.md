@@ -39,8 +39,20 @@ scene.add(new Pendulum({ length: 2, initialAngle: 0.9 })); // ODE-integrated eac
 ```
 
 The default `SimpleEngine` (semi-implicit Euler + gravity + floor collision) is
-dependency-free and stepped per frame. For heavy collision/constraints the engine
-is **pluggable** (same `step(dt)` contract): use **planck.js** (pure-JS Box2D —
-the recommended optional backend, no WASM) or **@dimforge/rapier2d** (WASM) when
-cross-machine bit-exact determinism matters. `Pendulum` integrates
+dependency-free and stepped per frame. `Pendulum` integrates
 `θ'' = −(g/L)·sinθ` directly (no engine needed).
+
+**SimpleEngine limitations — know what you're getting:**
+- Rotation is **kinematic only**: `addBody(mob, { angularVelocity: 2 })` spins a
+  body at a constant rate about its center, but collisions never impart or
+  change spin (no friction impulses, no moment of inertia).
+- The **only collision is the floor plane** (with restitution). There is no
+  body–body collision, no walls, no arbitrary shapes, no constraints/joints.
+- Integration is plain semi-implicit Euler — fine for demos, not for stacked
+  or resting-contact scenes (objects will jitter or sink).
+
+For anything beyond "things fall and bounce", bring a real engine — the
+interface is **pluggable** (same `step(dt)` contract): **planck.js** (pure-JS
+Box2D — recommended, no WASM) or **@dimforge/rapier2d** (WASM) when cross-machine
+bit-exact determinism matters. Note that neither adapter ships in the box yet;
+you implement `PhysicsEngineLike` around the engine of your choice.

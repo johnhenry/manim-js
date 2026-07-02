@@ -113,6 +113,32 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): Ma
     byDepth.get(d)!.push(node.id);
   }
   const maxDepth = Math.max(0, ...byDepth.keys());
+
+  // Crossing reduction: barycenter sweeps. Order each layer by the mean index
+  // of its neighbors in the adjacent layer (downward then upward), which
+  // reduces — does not minimize — edge crossings. Deterministic: ties keep the
+  // current (stable) order.
+  const preds = new Map<string, string[]>();
+  for (const e of graph.edges) { if (!preds.has(e.to)) preds.set(e.to, []); preds.get(e.to)!.push(e.from); }
+  const orderLayer = (ids: string[], neighborOf: (id: string) => string[], indexIn: Map<string, number>) => {
+    const bary = new Map<string, number>();
+    ids.forEach((id, i) => {
+      const ns = neighborOf(id).map((n) => indexIn.get(n)).filter((v): v is number => v != null);
+      bary.set(id, ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : i);
+    });
+    ids.sort((a, b) => bary.get(a)! - bary.get(b)!);
+  };
+  const indexMap = (ids: string[]) => new Map(ids.map((id, i) => [id, i]));
+  for (let sweep = 0; sweep < 2; sweep++) {
+    for (let d = 1; d <= maxDepth; d++) {       // downward: order by predecessors
+      const prev = byDepth.get(d - 1), cur = byDepth.get(d);
+      if (prev && cur) orderLayer(cur, (id) => preds.get(id) ?? [], indexMap(prev));
+    }
+    for (let d = maxDepth - 1; d >= 0; d--) {   // upward: order by successors
+      const next = byDepth.get(d + 1), cur = byDepth.get(d);
+      if (next && cur) orderLayer(cur, (id) => adj.get(id) ?? [], indexMap(next));
+    }
+  }
   for (const [d, ids] of byDepth) {
     const count = ids.length;
     ids.forEach((id, i) => {

@@ -18,6 +18,8 @@ export interface PhysicsBody {
   mass: number;
   static?: boolean;
   restitution?: number;
+  /** Spin (rad/s) about the body's center. Torque-free: constant unless you change it. */
+  angularVelocity?: number;
 }
 
 export interface PhysicsEngineOptions {
@@ -48,6 +50,7 @@ export class SimpleEngine implements PhysicsEngineLike {
       mass: opts.mass ?? 1,
       static: opts.static ?? false,
       restitution: opts.restitution,
+      angularVelocity: opts.angularVelocity ?? 0,
     };
     this.bodies.push(body);
     return body;
@@ -60,6 +63,10 @@ export class SimpleEngine implements PhysicsEngineLike {
       b.velocity = V.add(b.velocity, V.scale(this.gravity, dt));
       const delta = V.scale(b.velocity, dt);
       b.mob.shift(delta);
+      // Torque-free spin about the body's own center. Collisions do NOT couple
+      // into spin (no friction impulses) — this makes tumbling expressible, not
+      // physically emergent.
+      if (b.angularVelocity) b.mob.rotate(b.angularVelocity * dt);
       // Floor collision (approximate: use the body's lowest point).
       if (this.floor != null) {
         let bottom = b.mob.getCenter()[1];

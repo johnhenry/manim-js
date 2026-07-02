@@ -16,6 +16,11 @@ writeFileSync("out.otio", sceneToOtioString(scene, { name: "demo", mediaUrl: "ou
 `RationalTime {value, rate}` keeps everything frame-exact (no float drift). The
 JS/WASM OTIO bindings are immature, so the schema is reimplemented in TS.
 
+**Limitations:** the export is a single video track of clips — no audio tracks,
+no transition/effect metadata, and every clip references the same flat render
+(`mediaUrl`) by frame range. It is a timeline skeleton for conforming in an NLE,
+not a full project interchange.
+
 ## Lottie import/export
 
 ```js
@@ -25,10 +30,18 @@ const mob = loadLottie(existingLottieJson);                            // -> a V
 ```
 
 Maps VMobject cubic-Bézier subpaths to Lottie's shape model (`v` vertices with
-relative `i`/`o` tangents + closed flag `c`). Scope is static geometry
-(round-trippable); full-fidelity Lottie (fills/strokes/trim/mattes/text) is out of
-scope — use ThorVG-WASM for import fidelity. Lottie is y-down, manim y-up, so y is
-negated on export/import.
+relative `i`/`o` tangents + closed flag `c`). Lottie is y-down, manim y-up, so y
+is negated on export/import.
+
+**Limitations (read before relying on this):**
+- **Static geometry only — no keyframes.** Export captures the mobject's
+  *current* shape; nothing you animate with `play()` appears in the Lottie.
+  Exporting an animated scene gives you a frozen frame, not the animation.
+- No fills, strokes, gradients, trim paths, mattes, or text on either
+  direction — geometry only. For high-fidelity *import* of rich Lottie files,
+  use ThorVG-WASM and rasterize.
+- Round-tripping is supported for what's in scope: `loadLottie(vmobjectToLottieJSON(m))`
+  reproduces the geometry.
 
 ## Watermark
 

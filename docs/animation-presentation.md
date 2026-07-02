@@ -52,3 +52,10 @@ DSL: `A`, `A[Label]`, `A --> B`, `A -- label --> B` (blank/`//` lines ignored).
 `layoutDiagram` supports `"layered"` (default) and `"circular"`; nodes/edges are
 tagged with `matchId` (`node:A`, `edge:A->B`) so transitions pair them
 automatically. See `examples/diagram.ts`.
+
+**Layout limitations:** the layered algorithm assigns ranks and orders nodes with
+a barycenter heuristic — it reduces but does not minimize edge crossings, and
+there is no edge routing (edges are straight lines that may pass through other
+nodes on dense graphs). Expect clean output for small diagrams (≲15 nodes);
+for publication-grade layout of large graphs, compute positions with a real
+engine (e.g. ELK/dagre) and pass them to `buildBoard` yourself.

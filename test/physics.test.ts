@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { electricFieldFunc, magneticFieldFunc, ElectricField, MagneticField, thinLensRefract } from "../src/physics/fields.ts";
 import { LinearWave, StandingWave } from "../src/physics/waves.ts";
 import { SimpleEngine, physics, Pendulum } from "../src/physics/rigid.ts";
-import { Dot } from "../src/mobject/geometry.ts";
+import { Dot, Square } from "../src/mobject/geometry.ts";
 import { Scene } from "../src/scene/Scene.ts";
 
 test("electric field points away from a + charge and weakens with distance", () => {
@@ -83,4 +83,18 @@ test("Pendulum swings and roughly conserves energy", () => {
   assert.notEqual(p.theta, theta0, "angle evolved");
   const e1 = p.energy();
   assert.ok(Math.abs(e1 - e0) / Math.abs(e0) < 0.1, `energy conserved within 10%: ${e0} -> ${e1}`);
+});
+
+test("SimpleEngine: angularVelocity spins a body kinematically", () => {
+  const eng = new SimpleEngine({ gravity: [0, 0, 0] });
+  const sq = new Square({ sideLength: 2 });
+  eng.addBody(sq, { angularVelocity: Math.PI / 2 }); // quarter turn per second
+  const corner0 = sq.points[0].slice();
+  eng.step(1); // one second -> 90 degrees
+  const c = sq.getCenter();
+  const p = sq.points[0];
+  // Rotating [x,y] by 90° about center maps (dx,dy) -> (-dy,dx).
+  const dx0 = corner0[0] - c[0], dy0 = corner0[1] - c[1];
+  assert.ok(Math.abs((p[0] - c[0]) - (-dy0)) < 1e-6, "x rotated");
+  assert.ok(Math.abs((p[1] - c[1]) - dx0) < 1e-6, "y rotated");
 });

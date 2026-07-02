@@ -52,9 +52,14 @@ console.log(studio.url); // open it; edit the scene file → the browser hot-rel
 // studio.close() when done
 ```
 Serves your Scene in a `<manim-player>` and re-imports + re-renders on every save
-(file-watch + Server-Sent Events, dependency-free). This is the foundation the
-heavier Studio features (checkpoint replay, mouse-camera orbit, an in-page eval
-REPL, a schema-driven props panel) build on.
+(file-watch + Server-Sent Events, dependency-free).
+
+**What Studio is today, honestly:** the hot-reload dev server above and the
+`schemaToControls` data layer below — that's it. The heavier features you might
+expect from a "studio" are **not implemented**: no checkpoint replay (every save
+re-renders the whole scene from scratch), no mouse camera pan/zoom/orbit, no
+in-page eval REPL, and no rendered props-panel UI (only the control *descriptors*
+exist; nothing draws them). These are planned on top of this foundation.
 
 ### Schema → props controls
 
@@ -62,5 +67,6 @@ REPL, a schema-driven props panel) build on.
 import { schemaToControls } from "manim-js/studio";
 const controls = schemaToControls(MyScene.schema); // [{ name, control, min, max, options, ... }]
 ```
-Turns a `defineSchema` spec into control descriptors for a props panel (render
-them with any UI).
+Turns a `defineSchema` spec into control descriptors for a props panel. This is
+data only — you render the controls with your own UI; Studio's harness page does
+not (yet) draw them.

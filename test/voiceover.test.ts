@@ -77,3 +77,24 @@ test("silent provider synthesizes a real clip (skips without ffmpeg)", { skip: !
   assert.ok(statSync(r.file).size > 0);
   assert.ok(r.durationSeconds > 1 && r.durationSeconds < 5, `est duration ${r.durationSeconds}`);
 });
+
+test("tracker.timingSource reports proportional when the provider has no word timings", async () => {
+  const scene = freshScene();
+  const vt = await voiceover(scene, "hello <bookmark mark='x'/> world", async () => {}, { provider: "fake" });
+  assert.equal(vt.timingSource, "proportional");
+});
+
+test("tracker.timingSource reports word-boundaries when the provider supplies them", async () => {
+  registerTTSProvider({
+    name: "fake-wb",
+    available: () => true,
+    synthesize: async (text) => ({
+      file: "",
+      durationSeconds: 2,
+      wordBoundaries: text.split(/\s+/).map((w, i) => ({ word: w, startMs: i * 500, endMs: i * 500 + 400 })),
+    }),
+  });
+  const scene = freshScene();
+  const vt = await voiceover(scene, "hello <bookmark mark='x'/> world", async () => {}, { provider: "fake-wb" });
+  assert.equal(vt.timingSource, "word-boundaries");
+});

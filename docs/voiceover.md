@@ -38,9 +38,24 @@ any remaining audio so scene time reaches the clip's end. The tracker exposes
 
 `resolveTTSProvider(preferred)` picks the first available (falling back to
 `silent`). Register your own with `registerTTSProvider({ name, available, synthesize })`
-— `synthesize(text) → { file, durationSeconds, wordBoundaries? }`. When a provider
-supplies `wordBoundaries`, bookmarks map to exact word times; otherwise bookmark
-positions are proportional to the character offset.
+— `synthesize(text) → { file, durationSeconds, wordBoundaries? }`.
 
 Bookmarks: put `<bookmark mark="name"/>` inline in the narration text; the tag is
 stripped from what's spoken and its position becomes a cue you can wait for.
+
+## Bookmark timing accuracy — important
+
+Bookmarks are only *word-exact* when the provider returns `wordBoundaries`.
+**None of the built-in providers do** — the OpenAI and ElevenLabs adapters use
+plain audio endpoints that return no word timings, and `system`/`silent` have
+none either. Without word boundaries, a bookmark's time is **estimated
+proportionally from its character offset** in the text. Real speech pace varies,
+so expect drift — typically up to a few hundred milliseconds, more on long
+sentences with pauses.
+
+Check `tracker.timingSource` at runtime: `"word-boundaries"` (exact) or
+`"proportional"` (estimated). If you need exact sync today: keep narration
+segments short (drift scales with segment length), place bookmarks near the
+start of sentences, or register a custom provider for a TTS API that returns
+timings (e.g. Azure Speech's word-boundary events or ElevenLabs'
+`/with-timestamps` endpoint) and pass them through as `wordBoundaries`.

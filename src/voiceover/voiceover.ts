@@ -52,15 +52,29 @@ function charIndexToTime(
 
 export class VoiceoverTracker {
   readonly duration: number;
+  /**
+   * How bookmark times were derived. "word-boundaries" means the TTS provider
+   * returned per-word timings and bookmarks are exact; "proportional" means the
+   * bookmark time is estimated from its character offset (speech pace varies,
+   * so expect drift of up to a few hundred ms on real narration).
+   */
+  readonly timingSource: "word-boundaries" | "proportional";
   private scene: any;
   private startTime: number;
   private bookmarkTimes: Map<string, number>;
 
-  constructor(scene: any, duration: number, startTime: number, bookmarkTimes: Map<string, number>) {
+  constructor(
+    scene: any,
+    duration: number,
+    startTime: number,
+    bookmarkTimes: Map<string, number>,
+    timingSource: "word-boundaries" | "proportional" = "proportional",
+  ) {
     this.scene = scene;
     this.duration = duration;
     this.startTime = startTime;
     this.bookmarkTimes = bookmarkTimes;
+    this.timingSource = timingSource;
   }
 
   /** Absolute scene time (seconds) of a bookmark. */
@@ -112,7 +126,8 @@ export async function voiceover(
   const startTime = scene.time;
   if (result.file) scene.addSound(result.file, { timeOffset: startTime, gain: options.gain ?? 1 });
 
-  const tracker = new VoiceoverTracker(scene, duration, startTime, bookmarkTimes);
+  const timingSource = result.wordBoundaries?.length ? "word-boundaries" as const : "proportional" as const;
+  const tracker = new VoiceoverTracker(scene, duration, startTime, bookmarkTimes, timingSource);
   await callback(tracker);
 
   const remaining = startTime + duration - scene.time;
