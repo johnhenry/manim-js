@@ -40,7 +40,7 @@ function isTexMobject(m: any): boolean {
 
 // The "pieces" of a mobject to match on. For MathTex-like objects the pieces
 // are the addressable part VGroups; otherwise its submobjects (or itself).
-function piecesOf(mobject: any): any[] {
+export function piecesOf(mobject: any): any[] {
   if (isTexMobject(mobject)) return mobject.parts.slice();
   return mobject.submobjects && mobject.submobjects.length ? mobject.submobjects : [mobject];
 }
@@ -99,7 +99,7 @@ function shapeKey(piece: any): string {
 //
 // This is the shared core: TransformMatchingTex feeds it tex-keyed pieces,
 // TransformMatchingShapes feeds it shape-keyed pieces.
-function buildMatchingFromKeyed(
+export function buildMatchingFromKeyed(
   sourceKeyed: Array<[string, any]>,
   targetKeyed: Array<[string, any]>,
   config: MatchingConfig,

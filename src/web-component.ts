@@ -46,7 +46,7 @@ function buildElementClass(): any {
 
   class ManimPlayerElementImpl extends HTMLElementRef {
     static get observedAttributes(): string[] {
-      return ["quality", "fps", "background", "autoplay", "loop", "controls", "width", "height"];
+      return ["quality", "fps", "background", "autoplay", "loop", "controls", "width", "height", "presenter", "playback-rate", "volume"];
     }
 
     // Internal state ---------------------------------------------------------
@@ -68,6 +68,11 @@ function buildElementClass(): any {
     connectedCallback(): void {
       if (this._canvas) return; // already set up
       this._setup();
+      // Presenter keyboard nav (space/arrows/f). Make the element focusable.
+      try {
+        if (this.getAttribute?.("tabindex") == null) this.setAttribute?.("tabindex", "0");
+        this.addEventListener?.("keydown", this._onKeyDown);
+      } catch { /* ignore */ }
     }
 
     disconnectedCallback(): void {
@@ -204,6 +209,31 @@ function buildElementClass(): any {
       this._syncPlayButton();
     }
 
+    // --- presenter controls (Phase 4) ---------------------------------------
+    setPlaybackRate(rate: number): void { this._player?.setPlaybackRate(rate); }
+    setVolume(v: number): void { this._player?.setVolume(v); }
+    setPresenterMode(on: boolean): void { if (this._player) this._player.presenterMode = !!on; }
+    nextSection(): void { this._player?.nextSection(); }
+    prevSection(): void { this._player?.prevSection(); }
+    seekToSection(nameOrIndex: string | number): void { this._player?.seekToSection(nameOrIndex); }
+    toggleFullscreen(): void {
+      try {
+        const doc: any = (globalThis as any).document;
+        if (doc?.fullscreenElement) doc.exitFullscreen?.();
+        else (this as any).requestFullscreen?.();
+      } catch { /* ignore */ }
+    }
+
+    _onKeyDown = (e: any): void => {
+      switch (e.key) {
+        case " ": case "k": e.preventDefault?.(); this._player?.playing ? this.pause() : this.play(); break;
+        case "ArrowRight": case "PageDown": this.nextSection(); break;
+        case "ArrowLeft": case "PageUp": this.prevSection(); break;
+        case "f": this.toggleFullscreen(); break;
+        case "Home": this._player?.seek(0); break;
+      }
+    };
+
     // --- Internal helpers ---------------------------------------------------
     _readOptions(): PlayerOptions {
       const opts: PlayerOptions = {};
@@ -233,6 +263,10 @@ function buildElementClass(): any {
       const opts = this._readOptions();
       opts.canvas = this._canvas;
       this._player = new Player(opts);
+      // Apply presenter attributes.
+      if (this.hasAttribute?.("presenter")) this._player.presenterMode = true;
+      const pr = this.getAttribute?.("playback-rate"); if (pr) this._player.setPlaybackRate(Number(pr));
+      const vol = this.getAttribute?.("volume"); if (vol) this._player.setVolume(Number(vol));
 
       // Wire onFrame -> "frame" event + "ended" detection.
       this._player.onFrame = (frame: number, time: number) => {
@@ -415,7 +449,7 @@ export const ManimPlayerElement: any = (() => {
     _ready = false;
 
     static get observedAttributes(): string[] {
-      return ["quality", "fps", "background", "autoplay", "loop", "controls", "width", "height"];
+      return ["quality", "fps", "background", "autoplay", "loop", "controls", "width", "height", "presenter", "playback-rate", "volume"];
     }
 
     set metadata(value: VideoMetaInput | null | undefined) {

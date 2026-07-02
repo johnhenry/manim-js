@@ -266,7 +266,22 @@ export class Player {
       if (!this._playing) return;
       const now = (G.performance?.now?.() ?? Date.now());
       const elapsed = (now - this._playStartWall) / 1000;
-      const target = this._playStartFrame + Math.round(elapsed * this.fps);
+      const target = this._playStartFrame + Math.round(elapsed * this.fps * this.playbackRate);
+      // Presenter mode: pause (or loop) at the end of the current section.
+      if (this.presenterMode) {
+        const sec = this.sectionContaining(this._current);
+        if (sec && target >= sec.endFrame - 1) {
+          if (String(sec.type).includes("loop")) {
+            this._playStartWall = now; this._playStartFrame = sec.startFrame;
+            this.seek(sec.startFrame);
+            this._rafId = G.requestAnimationFrame(tick);
+            return;
+          }
+          this.seek(sec.endFrame - 1);
+          this.pause();
+          return;
+        }
+      }
       if (target >= this.frames.length - 1) {
         this.seek(this.frames.length - 1);
         this.pause();
@@ -290,5 +305,48 @@ export class Player {
   /** Whether real-time playback is currently running. */
   get playing(): boolean {
     return this._playing;
+  }
+
+  // --- presenter controls (Phase 4) ----------------------------------------
+  /** Playback speed multiplier (1 = normal; supports fast/slow). */
+  playbackRate = 1;
+  /** Audio volume in [0,1] (stored; the <manim-player> reads it). */
+  volume = 1;
+  /** When true, playback pauses (or loops) at each section boundary. */
+  presenterMode = false;
+
+  setPlaybackRate(rate: number): void { this.playbackRate = Math.max(0.05, rate); }
+  setVolume(v: number): void { this.volume = Math.max(0, Math.min(1, v)); }
+
+  /** The recorded scene's sections (empty if none). */
+  sections(): any[] {
+    return (this.scene as any)?.sections ?? [];
+  }
+
+  /** The section containing a frame index, if any. */
+  sectionContaining(frame: number): any | undefined {
+    for (const s of this.sections()) if (frame >= s.startFrame && frame < s.endFrame) return s;
+    return undefined;
+  }
+
+  /** Seek to the start of a section (by name or index). */
+  seekToSection(nameOrIndex: string | number): void {
+    const secs = this.sections();
+    const sec = typeof nameOrIndex === "number" ? secs[nameOrIndex] : secs.find((s) => s.name === nameOrIndex);
+    if (sec) this.seek(sec.startFrame);
+  }
+
+  /** Jump to the next / previous section boundary (presenter navigation). */
+  nextSection(): void {
+    const secs = this.sections();
+    const next = secs.find((s) => s.startFrame > this._current);
+    if (next) this.seek(next.startFrame);
+    else this.seek(this.frames.length - 1);
+  }
+  prevSection(): void {
+    const secs = this.sections();
+    let target = 0;
+    for (const s of secs) if (s.startFrame < this._current - 1) target = s.startFrame;
+    this.seek(target);
   }
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.0 — adoption phase 4: animation depth + presentation
+
+- **`TransformMatchingAuto`** — automatic shared-element matching (à la Reveal.js
+  Auto-Animate / Motion `layoutId`): pairs pieces across two states by identity
+  (`matchId` → text → shape, position-independent), Transforms matched pairs
+  (tweening the move/size/color delta) and fades the rest.
+- **Presenter controls on `Player`** + `<manim-player>`: `playbackRate`, `volume`,
+  `presenterMode` (pause/loop at section boundaries via `SectionType.LOOP`),
+  `seekToSection`/`nextSection`/`prevSection`, and keyboard nav (space, arrows,
+  `f` fullscreen) + `presenter`/`playback-rate`/`volume` attributes on the element.
+- **Diagram-as-code** (`parseDiagram`, `layoutDiagram`, `buildBoard`, `diagram`):
+  a tiny Mermaid/D2-ish DSL → deterministic layered/circular layout → a board
+  (VGroup of node + edge mobjects tagged with `matchId`), so board-to-board
+  transitions animate via `TransformMatchingAuto` (elkjs is an optional future backend).
+
+12 new tests (566 total); type-clean; example `examples/diagram.ts` (board morph).
+
 ## 1.9.0 — adoption phase 3: voiceover / TTS-synced narration
 
 - **`voiceover(scene, text, callback, opts)`** (manim-voiceover style): synthesize

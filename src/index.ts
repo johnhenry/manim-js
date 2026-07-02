@@ -116,6 +116,11 @@ export {
   CyclicReplace, Swap,
 } from "./animation/transform_extra.ts";
 export { TransformMatchingShapes, TransformMatchingTex, matchingParts } from "./animation/transform_matching.ts";
+// Automatic shared-element matching (auto-Transform by matchId/text/shape).
+export { TransformMatchingAuto, autoMatchKeys } from "./animation/auto_matching.ts";
+// Diagram-as-code with animated board transitions (parse -> layout -> board).
+export { parseDiagram, layoutDiagram, buildBoard, diagram } from "./diagram/diagram.ts";
+export type { DiagramGraph, DiagramNode, DiagramEdge, BoardOptions } from "./diagram/diagram.ts";
 
 // Learnings from prior-art (py2ts converter, signals reactivity, frame Player).
 export { convert as py2ts } from "./tools/py2ts.ts";
