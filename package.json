@@ -3,6 +3,15 @@
   "version": "0.0.1",
   "description": "A JavaScript port of manim (Mathematical Animation Engine). Runs in Node (renders to MP4 via ffmpeg) and in the browser (live canvas + WebM export).",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnhenry/ecmanim.git"
+  },
+  "homepage": "https://github.com/johnhenry/ecmanim#readme",
+  "bugs": {
+    "url": "https://github.com/johnhenry/ecmanim/issues"
+  },
+  "author": "John Henry",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
