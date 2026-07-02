@@ -10,6 +10,7 @@ import { autoRegisterFonts, loadVectorFont } from "./renderer/fonts-node.ts";
 import { Scene } from "./scene/Scene.ts";
 import { QUALITIES } from "./index.ts";
 import { config as manimConfig, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_config.ts";
+import { startFfmpeg, writeToStream, encodeFrames, runFfmpeg, concatPartials, remuxCopy } from "./renderer/ffmpeg.ts";
 
 export * from "./index.ts";
 export { MathTexDvisvgm, mathTexDvisvgm, mathTexDvisvgmOrFallback, texToSVGViaDvisvgm, detectDvisvgmToolchain } from "./mobject/mathtex_dvisvgm.ts";
@@ -324,54 +325,6 @@ export function flushCache(outputOrDir: string): void {
   if (existsSync(partial)) rmSync(partial, { recursive: true, force: true });
 }
 
-// Encode an in-memory array of PNG frame buffers to a movie file.
-async function encodeFrames(frames: any[], opts: any): Promise<void> {
-  const { outPath } = opts;
-  mkdirSync(dirname(outPath), { recursive: true });
-  const ff = startFfmpeg(opts);
-  for (const buf of frames) await writeToStream(ff.stdin, buf);
-  ff.stdin.end();
-  await new Promise<void>((res, rej) => {
-    ff.on("close", (code: number) => (code === 0 ? res() : rej(new Error("ffmpeg partial exited " + code))));
-    ff.on("error", rej);
-  });
-}
-
-// Concatenate partial movie files into the final output using ffmpeg's concat
-// demuxer (stream copy — no re-encode). Robust: falls back to re-encode concat
-// if stream-copy concat fails (e.g. mismatched partials).
-async function concatPartials(partials: string[], outPath: string, verbose: boolean): Promise<void> {
-  const listPath = outPath.replace(/\.[^.]+$/, "") + ".concat.txt";
-  const body = partials.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n") + "\n";
-  writeFileSync(listPath, body);
-  const args = ["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outPath];
-  const ok = await runFfmpeg(args, verbose);
-  if (!ok) {
-    // Re-encode fallback.
-    const args2 = ["-y", "-f", "concat", "-safe", "0", "-i", listPath, outPath];
-    await runFfmpeg(args2, verbose, true);
-  }
-  if (existsSync(listPath)) rmSync(listPath);
-}
-
-// Copy/remux a single partial to the final output (stream copy).
-async function remuxCopy(src: string, outPath: string, verbose: boolean): Promise<void> {
-  const ok = await runFfmpeg(["-y", "-i", src, "-c", "copy", outPath], verbose);
-  if (!ok) await runFfmpeg(["-y", "-i", src, outPath], verbose, true);
-}
-
-function runFfmpeg(args: string[], verbose: boolean, throwOnFail = false): Promise<boolean> {
-  return new Promise<boolean>((res, rej) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", verbose ? "inherit" : "ignore"] });
-    ff.on("close", (code: number) => {
-      if (code === 0) res(true);
-      else if (throwOnFail) rej(new Error("ffmpeg exited " + code));
-      else res(false);
-    });
-    ff.on("error", (e) => (throwOnFail ? rej(e) : res(false)));
-  });
-}
-
 // Write each section to media/sections/<name>.<ext> and a <Scene>.json index in
 // manim's sections format: [{ name, type, video, id, ... }].
 async function writeSections(scene: Scene, outPath: string, format: string, verbose: boolean): Promise<void> {
@@ -485,35 +438,3 @@ export async function loadPlugins(config: string | { plugins?: any[] } = "manim.
   return registry;
 }
 
-function startFfmpeg({ fps, pixelWidth, pixelHeight, outPath, format, transparent, verbose }: any) {
-  const args = [
-    "-y",
-    "-f", "image2pipe",
-    "-framerate", String(fps),
-    "-i", "-",
-    "-s", `${pixelWidth}x${pixelHeight}`,
-  ];
-  if (format === "webm") {
-    // VP9 with alpha (yuva420p) — transparent by default, as before.
-    args.push("-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "30");
-  } else if (format === "gif") {
-    args.push("-vf", `fps=${fps},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`);
-  } else if (format === "mov") {
-    // ProRes 4444 preserves an alpha channel — the transparent-capable mp4 path.
-    args.push("-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le");
-  } else {
-    // mp4 / h264. h264 cannot store alpha, so transparency is only honored via
-    // the .mov (prores) fallback chosen in render(); here we keep yuv420p.
-    args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "18", "-movflags", "+faststart");
-  }
-  args.push(outPath);
-  const ff = spawn("ffmpeg", args, { stdio: ["pipe", "inherit", verbose ? "inherit" : "ignore"] });
-  return ff;
-}
-
-function writeToStream(stream: any, buf: any) {
-  return new Promise<void>((res) => {
-    if (!stream.write(buf)) stream.once("drain", res);
-    else res();
-  });
-}

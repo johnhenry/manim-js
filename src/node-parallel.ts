@@ -25,8 +25,7 @@
 // caller should use node.ts render() for those.
 
 /// <reference types="node" />
-import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import os from "node:os";
@@ -37,6 +36,9 @@ import { QUALITIES } from "./index.ts";
 import { QUALITY_PRESETS, config as manimConfig } from "./_config.ts";
 import { discoverSegments, partitionSegments } from "./scene/render_frame.ts";
 import type { SegmentRecord } from "./scene/render_frame.ts";
+// Shared ffmpeg helpers — the single source of truth for both the sequential
+// (node.ts) and parallel cache paths, keeping partial files byte-compatible.
+import { encodeFrames, concatPartials, remuxCopy } from "./renderer/ffmpeg.ts";
 
 export interface RenderParallelOptions {
   fps?: number;
@@ -92,78 +94,6 @@ function resolveRender(options: RenderParallelOptions): Resolved {
   const outPath = resolve(options.outPath ?? options.output ?? "output.mp4");
   const cacheDir = join(dirname(outPath), "partial");
   return { fps, pixelWidth, pixelHeight, background, format, partialExt, outPath, cacheDir };
-}
-
-// ---------------------------------------------------------------------------
-// ffmpeg helpers — REPLICATED from node.ts (those functions are not exported).
-// Kept behaviorally identical so partials interoperate with node.ts's cache.
-// ---------------------------------------------------------------------------
-function startFfmpeg({ fps, pixelWidth, pixelHeight, outPath, format, verbose }: any) {
-  const args = [
-    "-y",
-    "-f", "image2pipe",
-    "-framerate", String(fps),
-    "-i", "-",
-    "-s", `${pixelWidth}x${pixelHeight}`,
-  ];
-  if (format === "webm") {
-    args.push("-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "30");
-  } else if (format === "gif") {
-    args.push("-vf", `fps=${fps},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`);
-  } else if (format === "mov") {
-    args.push("-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le");
-  } else {
-    args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "18", "-movflags", "+faststart");
-  }
-  args.push(outPath);
-  return spawn("ffmpeg", args, { stdio: ["pipe", "inherit", verbose ? "inherit" : "ignore"] });
-}
-
-function writeToStream(stream: any, buf: any): Promise<void> {
-  return new Promise<void>((res) => {
-    if (!stream.write(buf)) stream.once("drain", res);
-    else res();
-  });
-}
-
-async function encodeFrames(frames: any[], opts: any): Promise<void> {
-  const { outPath } = opts;
-  mkdirSync(dirname(outPath), { recursive: true });
-  const ff = startFfmpeg(opts);
-  for (const buf of frames) await writeToStream(ff.stdin, buf);
-  ff.stdin.end();
-  await new Promise<void>((res, rej) => {
-    ff.on("close", (code: number) => (code === 0 ? res() : rej(new Error("ffmpeg partial exited " + code))));
-    ff.on("error", rej);
-  });
-}
-
-function runFfmpeg(args: string[], verbose: boolean, throwOnFail = false): Promise<boolean> {
-  return new Promise<boolean>((res, rej) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", verbose ? "inherit" : "ignore"] });
-    ff.on("close", (code: number) => {
-      if (code === 0) res(true);
-      else if (throwOnFail) rej(new Error("ffmpeg exited " + code));
-      else res(false);
-    });
-    ff.on("error", (e) => (throwOnFail ? rej(e) : res(false)));
-  });
-}
-
-async function concatPartials(partials: string[], outPath: string, verbose: boolean): Promise<void> {
-  const listPath = outPath.replace(/\.[^.]+$/, "") + ".concat.txt";
-  const body = partials.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n") + "\n";
-  writeFileSync(listPath, body);
-  const ok = await runFfmpeg(["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", outPath], verbose);
-  if (!ok) {
-    await runFfmpeg(["-y", "-f", "concat", "-safe", "0", "-i", listPath, outPath], verbose, true);
-  }
-  if (existsSync(listPath)) rmSync(listPath);
-}
-
-async function remuxCopy(src: string, outPath: string, verbose: boolean): Promise<void> {
-  const ok = await runFfmpeg(["-y", "-i", src, "-c", "copy", outPath], verbose);
-  if (!ok) await runFfmpeg(["-y", "-i", src, outPath], verbose, true);
 }
 
 // ---------------------------------------------------------------------------
