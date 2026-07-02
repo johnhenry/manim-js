@@ -104,6 +104,31 @@ test("ComplexPlane n2p maps 1+1i up-right", () => {
   assert.ok(Math.abs(back.re - 1) < 1e-6 && Math.abs(back.im - 1) < 1e-6);
 });
 
+test("c2p places coordinates on the rendered axis line for an asymmetric xRange (issue #1)", () => {
+  // xRange not centered on zero: [0,70] instead of e.g. [-4,4]. Before the
+  // fix, coordsToPoint()'s x used xAxis.numberToPoint() directly, which
+  // ignored the shift() applied post-construction to re-center the axis on
+  // its zero-reference — producing a constant horizontal offset for any
+  // range whose reference isn't the midpoint.
+  const ax = new Axes({ xRange: [0, 70, 10], yRange: [0, 1, 0.5] });
+  const linePoints = ax.xAxis.axisLine.points;
+  const lineStartX = linePoints[0][0];
+  const lineEndX = linePoints[linePoints.length - 1][0];
+  assert.ok(Math.abs(ax.c2p(0, 0)[0] - lineStartX) < 1e-9);
+  assert.ok(Math.abs(ax.c2p(70, 0)[0] - lineEndX) < 1e-9);
+
+  // A dot at c2p(x, 0) for any x in range must land on the drawn axis line.
+  for (const x of [0, 17.5, 35, 52.5, 70]) {
+    const px = ax.c2p(x, 0)[0];
+    assert.ok(px >= lineStartX - 1e-9 && px <= lineEndX + 1e-9, `c2p(${x},0)[0]=${px} outside [${lineStartX},${lineEndX}]`);
+  }
+
+  // p2c must invert c2p (round-trip), including for a non-symmetric range.
+  const [rx, ry] = ax.p2c(ax.c2p(25.9, 0.25));
+  assert.ok(Math.abs(rx - 25.9) < 1e-9);
+  assert.ok(Math.abs(ry - 0.25) < 1e-9);
+});
+
 test("NumberPlane with LogBase scaling maps 100 correctly", () => {
   const ax = new NumberPlane({
     xRange: [0, 4, 1],

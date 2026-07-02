@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`Axes`/`NumberPlane` placed points at the wrong x-coordinate for any
+  `xRange` not centered on zero** (e.g. `[0, 70]`), reported as
+  [#1](https://github.com/johnhenry/ecmanim/issues/1). `coordsToPoint()`
+  (`c2p`) computed its x-coordinate via `xAxis.numberToPoint()`, which uses
+  the `NumberLine`'s pre-shift `_leftX` and ignores the `shift()` applied in
+  the `Axes` constructor to re-center the axis on its zero-reference — so the
+  *drawn* axis line moved but every plotted point/line/dot didn't, producing
+  a constant horizontal offset. Invisible for a symmetric range (shift is
+  zero) — exactly why it slipped through the bundled example and test suite.
+  Fixed by mirroring the y-axis's already-correct `_yWorld()` pattern with an
+  analogous `_xWorld()`, used by `coordsToPoint`, `pointToCoords`, and
+  `getXAxisLabel`. Added a regression test asserting `c2p()` output lands on
+  the actual rendered axis line for an asymmetric range, plus a round-trip
+  `c2p`/`p2c` check.
+
 ## 0.0.3
 
 ### Added

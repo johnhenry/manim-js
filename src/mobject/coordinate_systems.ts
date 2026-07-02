@@ -243,10 +243,20 @@ export class Axes extends VGroup {
 
   // Data coords (x,y) -> world point. Composes the two axis mappings.
   coordsToPoint(x: number, y: number): Vec3 {
-    const px = this.xAxis.numberToPoint(x);
-    return [px[0], this._yWorld(y), 0];
+    return [this._xWorld(x), this._yWorld(y), 0];
   }
   c2p(x: number, y: number): Vec3 { return this.coordsToPoint(x, y); }
+
+  // Horizontal world coordinate for data value x (after the x-axis was
+  // shifted so its reference sits at the origin). Mirrors _yWorld below —
+  // xAxis.numberToPoint()/pointToNumber() must NOT be used directly here,
+  // since they use the NumberLine's pre-shift _leftX and ignore the shift()
+  // applied in the constructor to re-center the axis at its reference value.
+  _xWorld(x: number): number {
+    const sx = this.xAxis.scaling.functionOf(x);
+    const s0 = this.xAxis.scaling.functionOf(this._xRef());
+    return (sx - s0) * this.xAxis.unit;
+  }
 
   // Vertical world coordinate for data value y (after the y-axis was rotated
   // and shifted so its reference sits at the origin).
@@ -258,10 +268,13 @@ export class Axes extends VGroup {
 
   // World point -> data coords (inverts coordsToPoint).
   pointToCoords(p: number[]): number[] {
-    const x = this.xAxis.pointToNumber(p);
+    // Invert _xWorld: sx = p[0]/unit + s0; then un-scale.
+    const s0x = this.xAxis.scaling.functionOf(this._xRef());
+    const sx = p[0] / this.xAxis.unit + s0x;
+    const x = this.xAxis.scaling.inverseFunctionOf(sx);
     // Invert _yWorld: sy = p[1]/unit + s0; then un-scale.
-    const s0 = this.yAxis.scaling.functionOf(this._yRef());
-    const sy = p[1] / this.yAxis.unit + s0;
+    const s0y = this.yAxis.scaling.functionOf(this._yRef());
+    const sy = p[1] / this.yAxis.unit + s0y;
     const y = this.yAxis.scaling.inverseFunctionOf(sy);
     return [x, y];
   }
@@ -397,7 +410,7 @@ export class Axes extends VGroup {
 
   getXAxisLabel(label: any, opts: { direction?: number[]; buff?: number } = {}): VMobject {
     const lbl = this._mkLabel(label);
-    const end = this.xAxis.numberToPoint(this.xRange[1]);
+    const end: Vec3 = [this._xWorld(this.xRange[1]), 0, 0];
     lbl.nextTo(end, opts.direction ?? V.UR, opts.buff ?? 0.2);
     return lbl;
   }
