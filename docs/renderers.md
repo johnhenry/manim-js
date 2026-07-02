@@ -133,3 +133,27 @@ from `ecmanim/node` for a graceful check.
 GPU output varies by driver/rasterizer, so `renderGL` output is **not** fed into
 the content-hash partial-movie cache. Use it for final high-fidelity renders;
 keep the CPU renderer for cache-friendly, reproducible builds.
+
+### Capture is real-time (wall-clock), not frame-clock
+
+`record()` (in `ecmanim/browser-three`, and the CPU `ecmanim/browser` backend)
+captures frames through `canvas.captureStream()` + `MediaRecorder`. That API
+stamps every captured frame with the *real* wall-clock time it was pushed —
+there is no way to hand it a synthetic per-frame duration. To get a WebM whose
+embedded timestamps actually match the scene's intended `fps`, each frame is
+throttled to its real target time (`start + frame * 1000 / fps`) before the
+next one is captured, exactly like the live `play()` path.
+
+The practical consequence: **`renderGL()` (and browser `record()`) take at
+least as long in wall-clock time as the scene's total `runTime`.** A 1.4s
+scene takes at least 1.4 real seconds to capture, no matter how fast the
+GPU/rasterizer can draw each frame — the bottleneck is intentionally the
+frame-pacing loop, not the renderer. If a *previous* build produced an output
+video with an implausibly short duration and a nonsensical `avg_frame_rate`
+(e.g. ffprobe reporting ~100+ fps instead of the requested `fps`), that was a
+pacing bug (frames were pushed on every `requestAnimationFrame` tick with no
+throttling, and rAF can fire far faster than the target fps under a
+headless/software backend) — not an inherent limitation of live capture, and
+not an ffmpeg/transcode issue. It has since been fixed; if you see it again,
+check that `record()`'s frame handler still throttles to `fps` before
+capturing the next frame.

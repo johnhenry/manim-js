@@ -109,10 +109,19 @@ export async function record(sceneOrConstruct: any, options: ThreeOptions = {}) 
 
   const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
   const scene = makeScene(sceneOrConstruct, { fps, camera });
+  // MediaRecorder timestamps captured frames by real wall-clock time (there is
+  // no way to hand it synthetic per-frame durations), so each frame must be
+  // paced to its real target time — exactly like play() below — or rAF firing
+  // faster than `fps` (e.g. unthrottled headless Chrome) compresses the whole
+  // clip into a fraction of its intended runTime.
+  const start = performance.now();
+  let frame = 0;
   scene.frameHandler = async (mobjects: any) => {
     renderer.render(mobjects);
     if (track.requestFrame) track.requestFrame();
-    await nextFrame();
+    frame++;
+    const target = start + (frame * 1000) / fps;
+    while (performance.now() < target) await nextFrame();
   };
   await runConstruct(sceneOrConstruct, scene);
 
