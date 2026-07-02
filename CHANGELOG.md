@@ -1,20 +1,33 @@
 # Changelog
 
-## Unreleased (0.0.1 pre-release hardening)
-
-Version reset to 0.0.1 — the package has never been published; the earlier
-1.x/2.0 numbers tracked development phases, not releases.
-
-### Renamed
-- **Project renamed from `manim-js` to `ecmanim`** ("ecma" + "manim") — package
-  name, CLI binary (`ecmanim`, formerly `manim-js`; `bin/ecmanim.ts`), GitHub
-  repo (`github.com/johnhenry/ecmanim`), and all docs/examples/import
-  specifiers updated. Not yet published, so no compatibility shim or deprecated
-  alias was needed. The bundled `manim-wasm` and `manim-portable-plugins`
-  sub-packages keep their names — they describe Manim-ecosystem/Python-manim
-  compatibility, not this package's brand.
+## 0.0.2
 
 ### Fixed
+- **The published npm CLI was completely broken.** `bin/ecmanim.ts` and
+  `bin/py2ts.ts` shipped as raw `.ts` source; Node refuses zero-config
+  TypeScript type-stripping for anything under `node_modules`, so every
+  `npx ecmanim <command>` and `npx py2ts` crashed immediately with
+  `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` for any real install — 100%
+  broken for every consumer, every subcommand. Only ever "worked" when run
+  from inside a git checkout of the repo itself, which is how it had always
+  been tested. Fixed by compiling `bin/*.ts` to `dist/bin/*.js` (new
+  `tsconfig.bin.json`) and pointing `package.json`'s `bin` field there.
+  Verified against a real `npm pack` + fresh install in an unrelated
+  directory, not just source-mode.
+- `ecmanim --help`/`-h` with no subcommand exited 1 instead of 0 (only
+  `<subcommand> --help` exited 0 correctly).
+- **`applyWatermark()` crashed the whole render on ffmpeg builds without
+  `libfreetype`** (e.g. Homebrew's default `ffmpeg` formula, which omits the
+  `drawtext` filter it needs). Now probes for the filter and warns + no-ops
+  instead of throwing, matching the project's established fallback pattern
+  (TeX → MathJax, TTS → silent).
+- **`renderGL()`/browser `record()` frame-capture pacing.** Captured frames
+  were pushed on every `requestAnimationFrame` tick with no throttling, so
+  under a headless/software WebGL backend (rAF firing faster than the target
+  fps) the captured WebM's wall-clock timestamps compressed the whole clip
+  into a fraction of its real runtime (e.g. a 1.4s scene reporting ~0.33s /
+  ~117fps). Now paced to each frame's real target time, matching the live
+  `play()` path. See [docs/renderers.md](docs/renderers.md).
 - **macOS: vector-text font resolution.** `loadVectorFont()`'s fallback font
   scanner only checked Linux font directories, so on macOS (where `fc-match`
   commonly resolves `sans-serif` to a rejected `.ttc` collection) `VText`,
@@ -27,6 +40,36 @@ Version reset to 0.0.1 — the package has never been published; the earlier
   directory; one test's cleanup could delete it while another was mid-render
   under the default parallel test runner, corrupting the ffmpeg concat step.
   Each now renders into its own unique subdirectory.
+- The `applyWatermark` test's ffmpeg guard only checked the binary existed,
+  not that it had `drawtext` — now checks `ffmpeg -filters` and skips cleanly
+  on builds that lack it instead of failing.
+
+### Added
+- `examples/plugins-demo.ts` — the plugin system end to end: a native
+  `use()` plugin and a portable JSON manifest (`loadManifestFromFile()`)
+  together in one scene, including a real shaded 3D surface (`MobiusStrip`)
+  defined purely as JSON math expressions.
+- `examples/coverage-mobjects.ts`, `examples/coverage-animations.ts` — a
+  registry audit found 24 mobjects and 29 animations with zero usage
+  anywhere in the repo; these exercise all of them against their actual
+  constructor signatures. Example/test coverage is now 121/121 mobjects and
+  67/67 animations (100%).
+
+## 0.0.1
+
+The first published release. Version reset to 0.0.1 — the earlier 1.x/2.0
+numbers tracked development phases, not releases.
+
+### Renamed
+- **Project renamed from `manim-js` to `ecmanim`** ("ecma" + "manim") — package
+  name, CLI binary (`ecmanim`, formerly `manim-js`; `bin/ecmanim.ts`), GitHub
+  repo (`github.com/johnhenry/ecmanim`), and all docs/examples/import
+  specifiers updated. Not yet published, so no compatibility shim or deprecated
+  alias was needed. The bundled `manim-wasm` and `manim-portable-plugins`
+  sub-packages keep their names — they describe Manim-ecosystem/Python-manim
+  compatibility, not this package's brand.
+
+### Fixed
 - **Cache soundness — container mobjects.** Segment hashes fingerprinted only an
   animation target's own `points`, which are empty for containers (VGroup,
   vector Text, diagram boards) — so moving/re-styling them between renders
