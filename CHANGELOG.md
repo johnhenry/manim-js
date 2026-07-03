@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.9
+
 ### Fixed
 - **`loadVectorFont`/`resolveFontPath` (Node) are now exported from
   `ecmanim`/`ecmanim/node`, not just the internal `renderer/fonts-node.ts`
