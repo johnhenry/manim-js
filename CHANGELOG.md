@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Fixed
+- **`setTextShapingBackend()` and the rest of the optional HarfBuzz
+  text-shaping API were never wired into the public `ecmanim`/`ecmanim/node`
+  barrels** — `import { setTextShapingBackend } from "ecmanim"` threw "does
+  not provide an export," making the entire 0.0.11 HarfBuzz feature
+  unreachable outside a deep import of `src/mobject/text_shaping.ts`. The
+  feature itself was correctly implemented and unit-tested against its own
+  module the whole time; this is the same class of gap the 0.0.12 release
+  notes describe catching for `linearTiming`/`springTiming`/
+  `registerStylePreset`, just missed for this one. `setTextShapingBackend`,
+  `getTextShapingBackend`, `isTextShapingBackendActive`, `buildGlyphRun`,
+  and `measureGlyphRunWidth` (plus their types) are now exported from
+  `src/index.ts`. Found while building an end-to-end scene that actually
+  opts into HarfBuzz shaping via the public package rather than a source
+  import.
 - Three `test/text-shaping-harfbuzz.test.ts` ligature tests assumed
   DejaVu-Sans-specific coverage ("ffi"/"office" merging into a ligature
   glyph). On macOS, `resolveFontPath()` commonly resolves to the system
