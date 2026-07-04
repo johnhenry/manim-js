@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **`Mobject.cacheStatic()`** + `CanvasRenderer` static-subtree render cache:
+  an opt-in marker that, on an unchanged frame (content-based fingerprint
+  of geometry/style AND camera state — NOT reference equality, since
+  `interpolate()` mutates `points` element-by-element while keeping the
+  same outer array reference), blits a small cached offscreen bitmap
+  instead of re-walking the mobject's bezier path. Screen-space, MVP-scoped:
+  invalidated on any camera-state change, so it mainly helps static-camera
+  scenes with many unchanging elements (dense axis labels, background
+  grids), not continuous camera motion. Requires a synchronous
+  offscreen-canvas backend (`OffscreenCanvas` or a detached `<canvas>`
+  element) — gracefully no-ops (draws directly, same as always) under
+  Node/no-DOM, where only an async `@napi-rs/canvas` import is available.
 - **Property-keyframe Studio timeline**: `Scene.track(keyframes)` (mirrors
   `addSound()`'s ergonomic) creates a `PlayableKeyframeTrack`
   (`src/reactive/keyframes.ts`) — Cluster 2's `KeyframeTrack` plus

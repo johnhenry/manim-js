@@ -24,6 +24,33 @@ function centroid(points: number[][]): Vec3 {
   return [x / n, y / n, z / n];
 }
 
+// A small SYNCHRONOUS offscreen-canvas factory for the static-subtree render
+// cache below (the per-frame draw path can't await an async canvas backend
+// mid-render). Works in the browser (OffscreenCanvas or a detached <canvas>
+// element); returns null under Node with no browser globals, since
+// @napi-rs/canvas can only be reached via an async import() -- caching
+// gracefully no-ops there (drawVMobject() runs directly, same as always).
+function makeSyncOffscreenCanvas(w: number, h: number): any {
+  const G: any = globalThis as any;
+  if (typeof G.OffscreenCanvas === "function") return new G.OffscreenCanvas(w, h);
+  if (typeof G.document !== "undefined") {
+    const c = G.document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    return c;
+  }
+  return null;
+}
+
+interface StaticCacheEntry {
+  canvas: any;
+  ctx: any;
+  fingerprint: string;
+  cameraFingerprint: string;
+  w: number;
+  h: number;
+}
+
 export interface CameraConfig {
   pixelWidth?: number;
   pixelHeight?: number;
@@ -111,6 +138,7 @@ export class CanvasRenderer {
   ctx: Ctx2D;
   camera: Camera;
   _zb?: ZBuffer;
+  private _staticCache = new WeakMap<any, StaticCacheEntry>();
 
   constructor(ctx: Ctx2D, camera: Camera) {
     this.ctx = ctx;
@@ -313,8 +341,104 @@ export class CanvasRenderer {
     for (const { mob } of flat) {
       if (mob._isText) this.drawText(mob);
       else if (mob._isImage) this.drawImage(mob);
+      else if (mob._cacheStatic) this._drawCachedVMobject(mob);
       else this.drawVMobject(mob);
     }
+  }
+
+  // --- static-subtree render cache (Mobject.cacheStatic()) -------------------
+  // Screen-space cache, MVP-scoped: invalidated on ANY camera-state change
+  // (frameCenter/frameWidth/frameHeight/zoom), so it mainly helps static-
+  // camera scenes with many unchanging elements, not continuous camera
+  // motion. World-space caching with a transform-only blit is a valid future
+  // refinement, out of scope here.
+
+  // Content-based fingerprint (NOT reference equality): Mobject.interpolate()
+  // mutates `points` element-by-element in place while keeping the same
+  // outer array reference, so `mob.points === cached.points` would be an
+  // incorrect/unsafe dirty-check -- it would stay true across an animation
+  // that IS visibly changing the shape.
+  private _fingerprintMobject(mob: any): string {
+    const pts: number[][] = mob.points ?? [];
+    const n = pts.length;
+    const sampleAt = [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1];
+    let s = String(n);
+    for (const i of sampleAt) {
+      if (i < 0 || i >= n) continue;
+      const p = pts[i];
+      s += `|${p[0].toFixed(4)},${p[1].toFixed(4)},${p[2].toFixed(4)}`;
+    }
+    // Color is a plain object with no toString() override, so template-
+    // string coercion would collapse every color to "[object Object]" --
+    // use its own toRGBAString()/toHex() explicitly.
+    const fill = mob.fillColor?.toRGBAString?.() ?? String(mob.fillColor);
+    const stroke = mob.strokeColor?.toRGBAString?.() ?? String(mob.strokeColor);
+    s += `|${fill}|${stroke}|${mob.strokeWidth}|${mob.fillOpacity}|${mob.strokeOpacity}|${mob.strokeEnd ?? 1}`;
+    return s;
+  }
+
+  private _cameraFingerprint(): string {
+    const c = this.camera;
+    return `${c.frameCenter.join(",")}|${c.frameWidth}|${c.frameHeight}|${c.zoom ?? 1}`;
+  }
+
+  private _pixelBBox(mob: any): { minX: number; minY: number; maxX: number; maxY: number } {
+    const { camera } = this;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of mob.points ?? []) {
+      const [x, y] = camera.toPixel(p);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  private _drawCachedVMobject(mob: any): void {
+    const bbox = this._pixelBBox(mob);
+    if (!isFinite(bbox.minX)) return;
+    // Pad by the stroke width so a wide stroke isn't clipped at the shape's
+    // raw point bounding box.
+    const pad = Math.ceil(((mob.strokeWidth ?? 0) + (mob.backgroundStrokeWidth ?? 0)) * this.camera.strokeScale()) + 2;
+    const minX = Math.floor(bbox.minX) - pad;
+    const minY = Math.floor(bbox.minY) - pad;
+    const w = Math.max(1, Math.ceil(bbox.maxX - bbox.minX) + pad * 2);
+    const h = Math.max(1, Math.ceil(bbox.maxY - bbox.minY) + pad * 2);
+
+    const fingerprint = this._fingerprintMobject(mob);
+    const cameraFingerprint = this._cameraFingerprint();
+    const cached = this._staticCache.get(mob);
+    if (cached && cached.fingerprint === fingerprint && cached.cameraFingerprint === cameraFingerprint && cached.w === w && cached.h === h) {
+      this.ctx.drawImage(cached.canvas, minX, minY);
+      return;
+    }
+
+    const canvas = makeSyncOffscreenCanvas(w, h);
+    if (!canvas) {
+      // No synchronous offscreen-canvas backend available (Node, no DOM) --
+      // fall back to drawing directly; caching is a no-op here.
+      this.drawVMobject(mob);
+      return;
+    }
+    const offCtx = canvas.getContext("2d");
+
+    const savedCtx = this.ctx;
+    const savedToPixel = this.camera.toPixel;
+    (this.camera as any).toPixel = (p: number[]): [number, number] => {
+      const [x, y] = savedToPixel.call(this.camera, p);
+      return [x - minX, y - minY];
+    };
+    this.ctx = offCtx;
+    try {
+      this.drawVMobject(mob);
+    } finally {
+      this.ctx = savedCtx;
+      (this.camera as any).toPixel = savedToPixel;
+    }
+
+    this._staticCache.set(mob, { canvas, ctx: offCtx, fingerprint, cameraFingerprint, w, h });
+    this.ctx.drawImage(canvas, minX, minY);
   }
 
   // Draw a raster ImageMobject into the pixel bounding box of its projected

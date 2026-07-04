@@ -43,6 +43,10 @@ export class Mobject {
   updatingSuspended: boolean;
   savedState?: Mobject;
   target?: Mobject;
+  /** Opt-in marker read by CanvasRenderer's static-subtree render cache
+   *  (set via cacheStatic()). Mainly helps static-camera scenes with many
+   *  unchanging elements (dense axis labels, background grids). */
+  _cacheStatic?: boolean;
 
   constructor(config: MobjectConfig = {}) {
     this.id = _idCounter++;
@@ -284,6 +288,16 @@ export class Mobject {
     if (this.updatingSuspended) return this;
     for (const fn of this.updaters) fn(this, dt);
     for (const m of this.submobjects) m.update(dt);
+    return this;
+  }
+
+  /** Opt into CanvasRenderer's static-subtree render cache: on an
+   *  unchanged frame (same geometry/style AND camera state), the renderer
+   *  blits a cached bitmap instead of re-walking this mobject's bezier
+   *  path. Best for elements that rarely change (dense axis labels,
+   *  background grids) in a mostly-static-camera scene. */
+  cacheStatic(enabled = true): this {
+    this._cacheStatic = enabled;
     return this;
   }
 
