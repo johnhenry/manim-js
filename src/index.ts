@@ -141,6 +141,14 @@ export type { Driver } from "./animation/expressions.ts";
 // GSAP-style Timeline builder (relative/absolute placement -> one AnimationGroup).
 export { Timeline, timeline } from "./animation/timeline.ts";
 export type { TimelineOptions } from "./animation/timeline.ts";
+// count/yoyo/repeatDelay wrapper for any leaf Animation/AnimationGroup/Timeline.
+export { Repeat } from "./animation/repeat.ts";
+export type { RepeatConfig } from "./animation/repeat.ts";
+// Composable stagger value-transform helpers (cycle()/staggerRange()).
+export { cycle, staggerRange } from "./animation/stagger.ts";
+// Unified keyframe-track primitive (structured/mutable, unlike opaque RateFuncs).
+export { KeyframeTrack, PlayKeyframeTrack, animateSignal } from "./animation/keyframe_track.ts";
+export type { Keyframe, KeyframeTrackOptions } from "./animation/keyframe_track.ts";
 // Vector (glyph-outline) DecimalNumber — crisp/SVG-friendly live numbers.
 export { VectorDecimalNumber, vectorDecimalNumber } from "./mobject/vector_value_tracker.ts";
 export type { VectorDecimalNumberConfig } from "./mobject/vector_value_tracker.ts";

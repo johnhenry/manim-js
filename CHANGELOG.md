@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **`KeyframeTrack<T>` / `PlayKeyframeTrack` / `animateSignal()`**
+  (`src/animation/keyframe_track.ts`): a unified keyframe-track primitive
+  that, unlike every other easing tool here, keeps its structured, mutable
+  keyframe list around for introspection/editing (a Studio scrub UI can
+  splice keyframes directly; `valueAt(t)` reflects it immediately).
+  Per-keyframe `ease` (a `RateFunc` or a string resolved via `running()`)
+  eases the transition arriving at that keyframe. Default interpolation
+  handles `number`/`number[]` via `V.lerp`; `options.interpolate` is the
+  escape hatch for other types (e.g. `Color.lerp` for a color track).
+  `PlayKeyframeTrack` is an `Animation` for `scene.play()`-driven use
+  (explicit `config.runTime` wins over the track's own duration, same
+  precedence as `transitions.ts`'s `springTiming()`); `.valueAt(t)` is also
+  usable directly inside a plain `addUpdater`. `animateSignal(signal, track)`
+  points a `PlayKeyframeTrack` at a signal's setter, giving "a signal driven
+  by a keyframe timeline" with no separate mechanism.
 - **`SceneRenderer` interface + `renderFrame()`** (`src/renderer/scene_renderer.ts`):
   `CanvasRenderer`, `ThreeRenderer`, and `SVGRenderer` each gain an additive
   `renderFrame(mobjects)` method that purely delegates to their existing,
