@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.10
+
 ### Fixed
 - **Node: `Text`/`estimateTextSize()` now auto-load a system font lazily on
   first use, instead of silently falling back to the raster/`CHAR_ASPECT`
