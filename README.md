@@ -46,7 +46,7 @@ await render(Demo, { output: "demo.mp4", quality: "high" });
 ## Install
 
 ```bash
-npm install            # pulls @napi-rs/canvas + three as optional deps
+npm install            # pulls @napi-rs/canvas + three + harfbuzzjs + yoga-layout as optional deps
 # ffmpeg (and ffprobe) must be on PATH for Node video output
 ```
 
@@ -362,8 +362,8 @@ Deeper module map, rendering pipeline, and registry mechanics:
 ## Testing
 
 ```bash
-npm test    # node --test — ~300 tests across 38 files (math, mobjects, animations,
-            # 3D/z-buffer, plugins, manifest, CLI/config, integration + headless renders)
+npm test    # node --test — ~850 tests across 110+ files (math, mobjects, animations,
+            # 3D/z-buffer, plugins, manifest, CLI/config, Studio/Player, integration + headless renders)
 ```
 
 ## Building
