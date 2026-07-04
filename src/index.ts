@@ -49,6 +49,11 @@ export * from "./mobject/text/code.ts";
 export * from "./mobject/text/variable.ts";
 export { ChangingDecimal, ChangeDecimalToValue } from "./animation/numbers.ts";
 export { VText, setDefaultFont, setDefaultFontSync, getDefaultFont } from "./mobject/vectorized_text.ts";
+export {
+  setTextShapingBackend, getTextShapingBackend, isTextShapingBackendActive,
+  buildGlyphRun, measureGlyphRunWidth,
+} from "./mobject/text_shaping.ts";
+export type { TextShapingBackend, GlyphRunEntry, GlyphRunResult, BuildGlyphRunOptions } from "./mobject/text_shaping.ts";
 export { parsePathToSubpaths, subpathsToVMobject } from "./mobject/svg_path.ts";
 export { MathTex, Tex, SingleStringMathTex, texToVGroup, initMathTex, texToSVG } from "./mobject/mathtex.ts";
 export { MathTexImage, mathTexImage } from "./mobject/mathtex_image.ts";

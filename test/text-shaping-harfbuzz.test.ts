@@ -15,6 +15,25 @@ import { resolveFontPath } from "../src/node.ts";
 // if harfbuzzjs's WASM can't load in this environment, matching this
 // project's existing "environment-dependent, degrade don't fail" test style.
 
+test("setTextShapingBackend and friends are reachable from the public ecmanim/ecmanim-node barrels", async () => {
+  // Confirmed bug: this whole backend was implemented and unit-tested
+  // exclusively against its own module (../src/mobject/text_shaping.ts)
+  // above, but was never wired into src/index.ts's barrel -- the same class
+  // of gap the 0.0.12 release notes describe catching for
+  // linearTiming/springTiming/registerStylePreset, just missed for this
+  // feature. `import { setTextShapingBackend } from "ecmanim"` threw
+  // "does not provide an export" until fixed.
+  const pub = await import("../src/index.ts");
+  assert.equal(typeof pub.setTextShapingBackend, "function");
+  assert.equal(typeof pub.getTextShapingBackend, "function");
+  assert.equal(typeof pub.isTextShapingBackendActive, "function");
+  assert.equal(typeof pub.buildGlyphRun, "function");
+  assert.equal(typeof pub.measureGlyphRunWidth, "function");
+
+  const node = await import("../src/node.ts");
+  assert.equal(typeof node.setTextShapingBackend, "function", "ecmanim/node re-exports the full public barrel");
+});
+
 test("harfbuzz backend: ligature-prone text produces fewer glyphs with ligatures on than off", async () => {
   const path = resolveFontPath();
   if (!path) return; // no system font in this environment
