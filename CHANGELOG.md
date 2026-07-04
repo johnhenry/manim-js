@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Added
+- **`Camera`/`ThreeDCamera` gain an opt-in `superSample` option** (issue
+  #26) fixing badly aliased 3D-scene rendering: `src/renderer/zbuffer.ts`'s
+  `ZBuffer` (used for every non-fixed-in-frame mobject in a `ThreeDScene`)
+  did hard, binary per-pixel edge tests with no anti-aliasing at all --
+  any `Text` or `VMobject` stroke at real 3D depth rendered with badly
+  staircased edges, most damaging on Text glyphs. `ZBuffer` now renders
+  internally at `superSample`x linear resolution and box-filters down in
+  `blitTo()`; every `triangle()`/`triangleGouraud()`/`line()` call site is
+  unchanged (still logical pixel-space coordinates -- the scale-up/down is
+  transparent). Default 1 (byte-identical to prior behavior, since this
+  costs `O(superSample^2)` more pixel work on a CPU rasterizer); pass
+  `new ThreeDCamera({ ..., superSample: 2 })` to opt in. Confirmed fixed
+  via direct pixel inspection of a cropped, zoomed rendered frame:
+  `superSample: 1` shows the exact staircase-stepped glyph edges reported;
+  2x and 3x both show smooth, gray-blended anti-aliased edges.
+
+### Fixed
+- **The render cache silently reused stale segments when only the
+  renderer/camera config changed** (issue #27) -- confirmed via direct
+  repro: re-rendering the exact same scene with only `background` changed
+  (`#FF0000` to `#0000FF`) produced byte-identical (still-red) output,
+  because `Scene.hashAnimations()`'s content hash has no knowledge of
+  resolution/background/3D-camera settings, only animation/mobject
+  content. Fixed via a new `Scene.computeRenderConfigHash(config)`,
+  salted into every partial filename in both `node.ts` and
+  `node-parallel.ts` (which share the same salt so their caches stay
+  byte-compatible, per the existing documented convention). Covers
+  resolution, background, fps, transparency, and (for a 3D camera)
+  orientation/zoom/rasterizer settings (including the new `superSample`
+  option above) at `render()` call time. Does not cover camera state that
+  changes mid-scene (ambient rotation, `moveCamera()`) -- a separate,
+  harder problem left alone here. Found while building a test harness to
+  verify the `superSample` fix above -- the harness's own before/after
+  comparison renders were silently hitting this exact bug.
+
 ## 0.0.13
 
 ### Added

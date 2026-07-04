@@ -8,7 +8,7 @@ import { dirname, resolve, join, basename } from "node:path";
 import { Camera, CanvasRenderer } from "./renderer/CanvasRenderer.ts";
 import { autoRegisterFonts, loadVectorFont, loadVectorFontSync, resolveFontPath } from "./renderer/fonts-node.ts";
 import { registerNodeFontAutoLoader } from "./mobject/vectorized_text.ts";
-import { Scene } from "./scene/Scene.ts";
+import { Scene, computeRenderConfigHash } from "./scene/Scene.ts";
 import { makeScene, runConstruct } from "./scene/orchestrate.ts";
 import { QUALITIES } from "./index.ts";
 import { config as manimConfig, resolveConfig, loadConfigFile, QUALITY_PRESETS } from "./_config.ts";
@@ -208,6 +208,12 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
   if (!camera.background) camera.background = background;
   const renderer = new CanvasRenderer(ctx, camera);
 
+  // See Scene.ts's computeRenderConfigHash() doc comment: the partial-segment
+  // cache key needs this salt, or a render-config change (background,
+  // resolution, 3D camera settings) can silently reuse a stale cached
+  // segment from a run with different config.
+  const cacheConfigHash = computeRenderConfigHash({ pixelWidth, pixelHeight, background, fps, transparent, camera });
+
   const outPath = resolve(output);
   mkdirSync(dirname(outPath), { recursive: true });
 
@@ -320,11 +326,15 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
     const segMap = new Map<number, any[]>();       // segId -> PNG buffers
     const segHashes = new Map<number, string>();   // segId -> content hash
     let activeSeg = -1;
+    // Salt every partial's cache key with cacheConfigHash (see above) so a
+    // render-config change can never reuse a segment produced under a
+    // different config, even when the animation content hash is identical.
+    const keyed = (h: string) => `${h}-${cacheConfigHash}`;
 
     scene.onSegment = (rec: { index: number; kind: string; hash: string; startFrame: number }) => {
       activeSeg = rec.index;
       segHashes.set(rec.index, rec.hash);
-      const partialPath = join(cacheDir, `${rec.hash}.${partialExt}`);
+      const partialPath = join(cacheDir, `${keyed(rec.hash)}.${partialExt}`);
       const reuse = existsSync(partialPath);
       if (reuse) reusedPartials++;
       return reuse ? { skip: true } : undefined;
@@ -343,7 +353,7 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
     // Encode any freshly-rendered segments to their partial files.
     for (const [id, frames] of segMap) {
       const hash = id < 0 ? "init" : (segHashes.get(id) ?? `seg${id}`);
-      const partialPath = join(cacheDir, `${hash}.${partialExt}`);
+      const partialPath = join(cacheDir, `${keyed(hash)}.${partialExt}`);
       if (!existsSync(partialPath) && frames.length) {
         await encodeFrames(frames, { fps, pixelWidth, pixelHeight, outPath: partialPath, format, transparent, verbose });
       }
@@ -354,11 +364,11 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
     // existing on-disk partial.
     const concatList: string[] = [];
     if (segMap.has(-1)) {
-      const p = join(cacheDir, `init.${partialExt}`);
+      const p = join(cacheDir, `${keyed("init")}.${partialExt}`);
       if (existsSync(p)) concatList.push(p);
     }
     for (const rec of scene.playRecords) {
-      const p = join(cacheDir, `${rec.hash}.${partialExt}`);
+      const p = join(cacheDir, `${keyed(rec.hash)}.${partialExt}`);
       if (existsSync(p)) concatList.push(p);
     }
 

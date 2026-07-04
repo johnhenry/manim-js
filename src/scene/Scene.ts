@@ -404,12 +404,57 @@ export class Scene {
   }
 }
 
-/** FNV-1a 32-bit hash, returned as an 8-char hex string. Deterministic + fast. */
-function fnv1a(str: string): string {
+/** FNV-1a 32-bit hash, returned as an 8-char hex string. Deterministic + fast.
+ *  Exported so callers outside Scene (e.g. node.ts's render-config cache-key
+ *  fingerprint) can reuse the same algorithm instead of duplicating it. */
+export function fnv1a(str: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
     h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
   }
   return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * Fingerprint the render-time config that affects final pixel output but is
+ * invisible to hashAnimations() above (which only looks at animation/mobject
+ * content): resolution, background, fps, transparency, and (for a 3D camera)
+ * orientation/zoom/rasterizer settings AT render() CALL TIME.
+ *
+ * Confirmed bug this fixes: node.ts/node-parallel.ts's partial-segment cache
+ * used to key solely off hashAnimations()'s content hash, so re-rendering the
+ * identical scene code with a different background/resolution/3D camera
+ * setting (or this session's new camera.superSample anti-aliasing option)
+ * silently reused a stale cached segment from a run with different config --
+ * e.g. asking for a blue background produced red output, because a cached
+ * red segment matched the (config-blind) content hash. Salting every partial
+ * filename with this fingerprint's return value fixes that.
+ *
+ * Deliberately shared between node.ts and node-parallel.ts (rather than each
+ * computing its own) so both cache paths stay byte-compatible, matching the
+ * existing "single source of truth" convention for their partial files
+ * (see node-parallel.ts's own header comment).
+ *
+ * Does NOT cover camera state that changes mid-scene (ambient rotation,
+ * moveCamera) -- that would require per-segment camera fingerprinting inside
+ * hashAnimations() itself, a separate, harder problem left alone here.
+ */
+export function computeRenderConfigHash(config: {
+  pixelWidth: number;
+  pixelHeight: number;
+  background: string;
+  fps: number;
+  transparent?: boolean;
+  camera?: any;
+}): string {
+  const parts: any[] = [config.pixelWidth, config.pixelHeight, config.background, config.fps, !!config.transparent];
+  const c = config.camera;
+  if (c && typeof c.projectionDepth === "function") {
+    parts.push(
+      c.phi, c.theta, c.gamma ?? 0, c.zoom ?? 1, c.superSample ?? 1,
+      !!c.disableZBuffer, !!c.flatShading, c.focalDistance ?? "",
+    );
+  }
+  return fnv1a(parts.join("|"));
 }
