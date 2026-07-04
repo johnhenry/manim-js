@@ -50,11 +50,51 @@ export class SVGRenderer {
   camera: Camera;
   precision: number;
   background: string | null;
+  // Per-renderToString-call gradient <defs>, so a gradient-filled VMobject
+  // (mob.gradientColors, set e.g. by SVGMobject's <linearGradient> import or
+  // VMobject.setColorByGradient) doesn't silently flatten to a solid color
+  // on this export path -- mirrors CanvasRenderer._buildGradient's
+  // bounding-box + sheenDirection approach, emitted as real SVG markup.
+  private _gradientDefs: string[] = [];
+  private _gradientCounter = 0;
 
   constructor(camera: Camera, opts: SVGRenderOptions = {}) {
     this.camera = camera;
     this.precision = opts.precision ?? 2;
     this.background = opts.background ?? null;
+  }
+
+  // Register a <linearGradient> def for `mob` (if it carries gradientColors)
+  // and return its `url(#id)` fill reference, or null if not gradient-filled.
+  private gradientFillRef(mob: any): string | null {
+    const colors: any[] = mob.gradientColors;
+    if (!colors || colors.length === 0) return null;
+    const { camera } = this;
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const p of mob.points) {
+      const [x, y] = camera.toPixel(p);
+      minx = Math.min(minx, x); miny = Math.min(miny, y);
+      maxx = Math.max(maxx, x); maxy = Math.max(maxy, y);
+    }
+    if (!isFinite(minx)) return null;
+    const dir = mob.sheenDirection ?? [-1, 1, 0];
+    const dx = dir[0];
+    const dy = -(dir[1] ?? 0); // world y-up -> pixel y-down, mirroring CanvasRenderer
+    const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+    const hw = (maxx - minx) / 2 || 1, hh = (maxy - miny) / 2 || 1;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const id = `grad${this._gradientCounter++}`;
+    const n = colors.length;
+    const stops = colors
+      .map((c, i) => `<stop offset="${this.n(n === 1 ? 0 : i / (n - 1))}" stop-color="${colorToCss(c, 1)}"/>`)
+      .join("");
+    this._gradientDefs.push(
+      `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" ` +
+      `x1="${this.n(cx - ux * hw)}" y1="${this.n(cy - uy * hh)}" ` +
+      `x2="${this.n(cx + ux * hw)}" y2="${this.n(cy + uy * hh)}">${stops}</linearGradient>`,
+    );
+    return `url(#${id})`;
   }
 
   // Round a number to `precision` decimals, stripping a trailing ".00". Guards
@@ -74,6 +114,9 @@ export class SVGRenderer {
     const { camera } = this;
     const W = camera.pixelWidth;
     const H = camera.pixelHeight;
+
+    this._gradientDefs = [];
+    this._gradientCounter = 0;
 
     const body: string[] = [];
     if (this.background != null) {
@@ -114,9 +157,11 @@ export class SVGRenderer {
       if (el) body.push(el);
     }
 
+    const defs = this._gradientDefs.length ? `<defs>${this._gradientDefs.join("")}</defs>` : "";
     return (
       `<svg xmlns="http://www.w3.org/2000/svg" width="${this.n(W)}" height="${this.n(H)}" ` +
       `viewBox="0 0 ${this.n(W)} ${this.n(H)}">` +
+      defs +
       body.join("") +
       `</svg>`
     );
@@ -186,19 +231,22 @@ export class SVGRenderer {
     // both are present with the same proportion they share one <path>; when the
     // stroke is truncated we emit a separate stroked path so the fill stays
     // whole (matching Canvas, which fills at 1 and strokes at proportion).
-    const attrs: string[] = [];
-
-    // Fill paint.
-    if (hasFill) {
-      attrs.push(`fill="${colorToCss(mob.fillColor, 1)}"`);
-      attrs.push(`fill-opacity="${this.n(fillOpacity * opacity)}"`);
-      attrs.push(`fill-rule="nonzero"`);
-    } else {
-      attrs.push(`fill="none"`);
-    }
-
+    // NOTE: build `attrs` only inside the branch that actually returns it --
+    // gradientFillRef() has a side effect (registers a <defs> entry), so
+    // computing it here unconditionally and then falling through to the
+    // "otherwise" block below (which computes its own fill paint) would
+    // register a duplicate, unused gradient def and use the wrong one.
     if (hasStroke && proportion >= 1) {
       // Single path carries both fill and stroke.
+      const attrs: string[] = [];
+      if (hasFill) {
+        const fillPaint = this.gradientFillRef(mob) ?? colorToCss(mob.fillColor, 1);
+        attrs.push(`fill="${fillPaint}"`);
+        attrs.push(`fill-opacity="${this.n(fillOpacity * opacity)}"`);
+        attrs.push(`fill-rule="nonzero"`);
+      } else {
+        attrs.push(`fill="none"`);
+      }
       attrs.push(`stroke="${colorToCss(mob.strokeColor, 1)}"`);
       attrs.push(`stroke-width="${this.n(strokeWidth * this.camera.strokeScale())}"`);
       attrs.push(`stroke-opacity="${this.n(strokeOpacity * opacity)}"`);
@@ -214,8 +262,9 @@ export class SVGRenderer {
     if (hasFill) {
       const dFill = this.tracePathData(mob, 1);
       if (dFill) {
+        const fillPaint = this.gradientFillRef(mob) ?? colorToCss(mob.fillColor, 1);
         parts.push(
-          `<path fill="${colorToCss(mob.fillColor, 1)}" ` +
+          `<path fill="${fillPaint}" ` +
           `fill-opacity="${this.n(fillOpacity * opacity)}" fill-rule="nonzero" ` +
           `stroke="none" d="${dFill}"/>`,
         );

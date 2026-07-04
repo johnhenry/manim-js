@@ -9,6 +9,7 @@ import { VMobject, VGroup } from "./VMobject.ts";
 import { Color } from "../core/color.ts";
 import { parsePathToSubpaths } from "./svg_path.ts";
 import { arcBezierPoints } from "../core/math/bezier.ts";
+import { Intersection } from "./boolean_ops.ts";
 import type { ColorLike } from "../core/types.ts";
 
 /** A parsed XML element node. */
@@ -184,6 +185,27 @@ export function parseTransform(str: string): Affine {
 // ---------------------------------------------------------------------------
 const DRAWABLE = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
 
+// Definition-only containers: their contents are referenced (by id, via
+// url(#id)/clip-path) rather than rendered in place. Previously NOT excluded
+// from the render walk, so e.g. a <rect> inside a <clipPath> was incorrectly
+// drawn as ordinary visible content.
+const NON_RENDERING_CONTAINERS = new Set([
+  "defs", "clipPath", "linearGradient", "radialGradient", "symbol", "mask", "pattern",
+]);
+
+// Walk the whole tree once (regardless of tag) recording every id'd node, so
+// url(#id)/clip-path references can resolve regardless of document order
+// (SVG allows a reference to appear before its <defs> definition).
+function collectDefs(root: XmlNode): Map<string, XmlNode> {
+  const defs = new Map<string, XmlNode>();
+  const visit = (node: XmlNode) => {
+    if (node.attrs?.id) defs.set(node.attrs.id, node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(root);
+  return defs;
+}
+
 // Parse a CSS style string ("fill:#f00;stroke:none") into a plain object.
 function parseStyleString(s: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -334,6 +356,99 @@ function elementSubpaths(tag: string, attrs: Record<string, string>): number[][]
 }
 
 // ---------------------------------------------------------------------------
+// 3.5 Gradient (<linearGradient> fill) and <clipPath> resolution.
+// ---------------------------------------------------------------------------
+
+// Gradient x1/y1/x2/y2 (and clipPath content) commonly use bare fractions or
+// percentages of the referencing element's bounding box -- unlike num()'s
+// plain parseFloat, "50%" here must become 0.5, not 50.
+function pctOrFrac(v: string | undefined, d: number): number {
+  if (v == null) return d;
+  const s = v.trim();
+  if (s.endsWith("%")) { const x = parseFloat(s); return Number.isFinite(x) ? x / 100 : d; }
+  const x = parseFloat(s);
+  return Number.isFinite(x) ? x : d;
+}
+
+// Apply only the linear (rotation/scale/skew) part of an affine to a
+// direction vector -- no translation, since a direction isn't a position.
+function applyAffineLinear(m: Affine, dx: number, dy: number): number[] {
+  return [m[0] * dx + m[2] * dy, m[1] * dx + m[3] * dy];
+}
+
+// A <stop>'s color: stop-color/stop-opacity are their own attributes (or
+// inline style), not part of readStyleProps' fill/stroke key set.
+function parseStopColor(attrs: Record<string, string>): Color {
+  const inline = parseStyleString(attrs.style || "");
+  const tok = inline["stop-color"] ?? attrs["stop-color"] ?? "#000000";
+  const { color } = parseColorToken(tok);
+  return color ?? Color.parse("#000000");
+}
+
+// Resolve a `fill: url(#id)` reference to a <linearGradient>'s stop colors
+// and a direction vector (world/VMobject sheen-direction convention). Scope:
+// <linearGradient> only (no <radialGradient> -- no renderer anywhere has
+// createRadialGradient support yet, a separate, bigger follow-up) and
+// objectBoundingBox-style fractional x1/y1/x2/y2 (gradientTransform and
+// gradientUnits="userSpaceOnUse" aren't handled -- direction-only, not a
+// full coordinate remap, is enough to make most authored gradients render
+// with plausible orientation rather than not at all).
+function resolveGradientFill(
+  fillTok: string,
+  defs: Map<string, XmlNode>,
+  m: Affine,
+): { colors: Color[]; direction: number[] } | null {
+  const match = /^url\(#([^)]+)\)$/.exec(fillTok.trim());
+  if (!match) return null;
+  const node = defs.get(match[1]);
+  if (!node || node.tag !== "linearGradient") return null;
+  const stops = (node.children || []).filter((c) => c.tag === "stop");
+  if (stops.length === 0) return null;
+  const colors = stops.map((s) => parseStopColor(s.attrs || {}));
+  const x1 = pctOrFrac(node.attrs.x1, 0), y1 = pctOrFrac(node.attrs.y1, 0);
+  const x2 = pctOrFrac(node.attrs.x2, 1), y2 = pctOrFrac(node.attrs.y2, 0);
+  const [dx, dy] = applyAffineLinear(m, x2 - x1, y2 - y1);
+  // Pre-negate y: this direction is stored on the mobject separately from
+  // .points, so it isn't touched by SVGMobject's later single global Y-flip
+  // of all point geometry -- negating now keeps it consistent with the
+  // (soon-to-be-flipped) visible shape.
+  return { colors, direction: [dx, -dy] };
+}
+
+// Build a clip VMobject from a <clipPath>'s drawable children (rect/circle
+// scope, matching elementSubpaths' own coverage) and intersect `mob` with
+// it. clipPathUnits defaults to userSpaceOnUse, so the clip content shares
+// the SAME accumulated transform `m` as whatever references it.
+function applyClipPath(
+  mob: VMobject,
+  clipPathAttr: string,
+  defs: Map<string, XmlNode>,
+  m: Affine,
+): VMobject {
+  const match = /^url\(#([^)]+)\)$/.exec(clipPathAttr.trim());
+  if (!match) return mob;
+  const node = defs.get(match[1]);
+  if (!node || node.tag !== "clipPath") return mob;
+
+  const clipMob = new VMobject();
+  for (const child of node.children || []) {
+    if (!DRAWABLE.has(child.tag)) continue;
+    let childM = m;
+    if (child.attrs?.transform) childM = compose(m, parseTransform(child.attrs.transform));
+    for (const sp of elementSubpaths(child.tag, child.attrs || {})) {
+      if (!sp || sp.length < 1) continue;
+      clipMob.subpathStarts.push(clipMob.points.length);
+      for (const p of sp) {
+        const [x, y] = applyAffine(childM, p[0], p[1]);
+        clipMob.points.push([x, y, 0]);
+      }
+    }
+  }
+  if (clipMob.points.length === 0) return mob;
+  return new Intersection(mob, clipMob);
+}
+
+// ---------------------------------------------------------------------------
 // 4. SVGMobject: walk the tree with accumulated transform + inherited style,
 //    build a VMobject per drawable element, flip Y once, then size & place.
 // ---------------------------------------------------------------------------
@@ -345,6 +460,7 @@ export class SVGMobject extends VGroup {
     super();
     this.config = config;
     const tree = parseXML(String(svgString));
+    const defs = collectDefs(tree);
 
     const overrideFill = config.fillColor ?? config.color ?? null;
     const overrideStroke = config.strokeColor ?? null;
@@ -353,6 +469,11 @@ export class SVGMobject extends VGroup {
 
     // Depth-first walk accumulating transform (parent->child) and style.
     const walk = (node: XmlNode, transform: Affine, parentStyle: Record<string, string>) => {
+      // Definition-only containers (<defs>, <clipPath>, <linearGradient>,
+      // ...): their contents are referenced by id elsewhere, not rendered
+      // in place -- don't descend into them at all.
+      if (NON_RENDERING_CONTAINERS.has(node.tag)) return;
+
       const attrs = node.attrs || {};
       // Accumulate this node's own transform (present on <g> and any element).
       let m = transform;
@@ -362,7 +483,7 @@ export class SVGMobject extends VGroup {
 
       if (DRAWABLE.has(node.tag)) {
         const subpaths = elementSubpaths(node.tag, attrs);
-        const mob = new VMobject();
+        let mob = new VMobject();
         for (const sp of subpaths) {
           if (!sp || sp.length < 1) continue;
           mob.subpathStarts.push(mob.points.length);
@@ -372,13 +493,26 @@ export class SVGMobject extends VGroup {
           }
         }
         if (mob.points.length) {
-          const s = resolveStyle(style, overrideFill, overrideStroke);
+          const gradient = style.fill ? resolveGradientFill(style.fill, defs, m) : null;
+          // A url(#...) fill isn't a color resolveStyle understands; resolve
+          // stroke/opacity normally, then layer the gradient's colors on top
+          // (config-level overrideFill still wins over an SVG-authored fill,
+          // gradient or otherwise -- matching the existing override contract).
+          let styleForResolve = style;
+          if (gradient) { const { fill: _fill, ...rest } = style; styleForResolve = rest; }
+          const s = resolveStyle(styleForResolve, overrideFill, overrideStroke);
           mob.fillColor = s.fillColor;
           mob.fillOpacity = s.fillOpacity;
           mob.strokeColor = s.strokeColor;
           mob.strokeWidth = s.strokeWidth;
           mob.strokeOpacity = s.strokeOpacity;
-          mobs.push(mob);
+          if (gradient && overrideFill == null) {
+            mob.fillColor = gradient.colors[0];
+            mob.gradientColors = gradient.colors;
+            mob.sheenDirection = gradient.direction;
+          }
+          if (attrs["clip-path"]) mob = applyClipPath(mob, attrs["clip-path"], defs, m);
+          if (mob.points.length) mobs.push(mob);
         }
       }
 
