@@ -21,7 +21,9 @@ export {
   timeToPixel, pixelToTime, frameToPixel, pixelToFrame,
   computeSectionThumbnails, renderSectionOverview, computeStepMarkers,
   computeWaveformBars, renderWaveform,
+  computeKeyframeMarkers, renderKeyframeTimeline, attachKeyframeTimelineEditor,
 } from "./studio/timeline.ts";
 export type {
   TimeAxisOptions, FrameAxisOptions, SectionThumbnailLayout, StepMarkerLayout, WaveformBar,
+  KeyframeMarkerLayout, KeyframeTimelineEditorOptions,
 } from "./studio/timeline.ts";

@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Property-keyframe Studio timeline**: `Scene.track(keyframes)` (mirrors
+  `addSound()`'s ergonomic) creates a `PlayableKeyframeTrack`
+  (`src/reactive/keyframes.ts`) — Cluster 2's `KeyframeTrack` plus
+  absolute-time `tick(dt)`/`seek(t)`, kept in exact agreement so authoring
+  playback and a Studio scrub can never drift apart. `bindTrack(mobject,
+  prop, track)` wires a track's value onto a mobject property via the
+  ordinary updater mechanism — zero `Scene`/render changes needed for
+  playback correctness. `scene.keyframeTracks` mirrors the existing
+  `sections`/`sounds` array pattern. New `computeKeyframeMarkers()`/
+  `renderKeyframeTimeline()`/`attachKeyframeTimelineEditor()`
+  (`src/studio/timeline.ts`) draw a draggable per-track keyframe strip;
+  dragging updates a keyframe's time (keeping keyframes sorted), and a
+  debounced `onCommit` hook is meant to call item 7's parameter-only
+  re-render primitive (`player.rerender()`) to rebake frames, since
+  `Player.frames[]` are frozen bitmaps that a drag alone can't affect.
 - **Rendered props panel** (`startStudio({ props: true })`): draws one
   control per `schemaToControls()` descriptor, pre-filled from the schema's
   own defaults. Edits are debounced (80ms) and re-render via

@@ -150,6 +150,9 @@ export { cycle, staggerRange } from "./animation/stagger.ts";
 // Unified keyframe-track primitive (structured/mutable, unlike opaque RateFuncs).
 export { KeyframeTrack, PlayKeyframeTrack, animateSignal } from "./animation/keyframe_track.ts";
 export type { Keyframe, KeyframeTrackOptions } from "./animation/keyframe_track.ts";
+// Studio-facing property-keyframe track: absolute-time tick(dt)/seek(t) over
+// KeyframeTrack, plus bindTrack() wiring a track onto a mobject property.
+export { PlayableKeyframeTrack, bindTrack } from "./reactive/keyframes.ts";
 // Vector (glyph-outline) DecimalNumber — crisp/SVG-friendly live numbers.
 export { VectorDecimalNumber, vectorDecimalNumber } from "./mobject/vector_value_tracker.ts";
 export type { VectorDecimalNumberConfig } from "./mobject/vector_value_tracker.ts";

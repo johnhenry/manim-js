@@ -142,3 +142,143 @@ export function renderWaveform(
   }
   return bars;
 }
+
+// --- keyframe timeline (item 8) ---------------------------------------------
+// Data shape here is intentionally NOT the same as sections/steps/waveform
+// bars (a keyframe carries `t` + `value`, coordinated with
+// src/reactive/keyframes.ts's PlayableKeyframeTrack) -- only the layout math
+// (timeToPixel/pixelToTime) is shared.
+
+export interface KeyframeMarkerLayout {
+  track: { keyframes: Array<{ t: number }> };
+  keyframe: { t: number };
+  index: number;
+  x: number;
+}
+
+/** Pure layout: one marker per keyframe across all tracks, positioned by time. */
+export function computeKeyframeMarkers(
+  tracks: Array<{ keyframes: Array<{ t: number }> }>,
+  opts: TimeAxisOptions,
+): KeyframeMarkerLayout[] {
+  const markers: KeyframeMarkerLayout[] = [];
+  for (const track of tracks) {
+    track.keyframes.forEach((keyframe, index) => {
+      markers.push({ track, keyframe, index, x: timeToPixel(keyframe.t, opts) });
+    });
+  }
+  return markers;
+}
+
+/** Draws one row per track, one dot per keyframe. */
+export function renderKeyframeTimeline(
+  ctx: any,
+  tracks: Array<{ keyframes: Array<{ t: number }> }>,
+  opts: TimeAxisOptions & { rowHeight?: number; radius?: number; color?: string },
+): KeyframeMarkerLayout[] {
+  const rowHeight = opts.rowHeight ?? 20;
+  const radius = opts.radius ?? 5;
+  const markers = computeKeyframeMarkers(tracks, opts);
+  if (ctx) {
+    ctx.fillStyle = opts.color ?? "#f6ad55";
+    for (const m of markers) {
+      const rowIndex = tracks.indexOf(m.track);
+      const y = rowIndex * rowHeight + rowHeight / 2;
+      ctx.beginPath?.();
+      ctx.arc?.(m.x, y, radius, 0, Math.PI * 2);
+      ctx.fill?.();
+    }
+  }
+  return markers;
+}
+
+export interface KeyframeTimelineEditorOptions extends TimeAxisOptions {
+  rowHeight?: number;
+  /** Pixel radius within which a pointerdown grabs a keyframe marker. */
+  hitRadius?: number;
+  /** Called after every drag-move (cheap visual update only). */
+  onChange?: () => void;
+  /**
+   * Called once, debounced, after a drag-release. CRITICAL wiring detail:
+   * Player.frames[] are frozen bitmaps, so dragging a keyframe has no
+   * effect on already-recorded frames until a re-record happens -- wire
+   * this to the SAME parameter-only re-render primitive item 7 uses
+   * (`player.rerender(...)` / `Player.record(scene, { props })`) to rebake.
+   */
+  onCommit?: () => void;
+  /** Debounce delay before onCommit() fires (default 150ms). */
+  commitDelayMs?: number;
+}
+
+/**
+ * Attaches pointer drag handlers to `canvas` for dragging a keyframe's `t`
+ * along the shared time axis (mutating `track.keyframes` directly -- the
+ * same "sorted, mutable" contract KeyframeTrack.addKeyframe()/
+ * removeKeyframe() already expose for Studio editability).
+ */
+export function attachKeyframeTimelineEditor(
+  canvas: any,
+  tracks: Array<{ keyframes: Array<{ t: number }> }>,
+  opts: KeyframeTimelineEditorOptions,
+): { detach(): void } {
+  const rowHeight = opts.rowHeight ?? 20;
+  const hitRadius = opts.hitRadius ?? 8;
+  const commitDelayMs = opts.commitDelayMs ?? 150;
+
+  let dragging: KeyframeMarkerLayout | null = null;
+  let commitTimer: any = null;
+
+  const pointerPos = (ev: any): [number, number] => {
+    const rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+    return [ev.clientX - rect.left, ev.clientY - rect.top];
+  };
+
+  const onPointerDown = (ev: any): void => {
+    const [px, py] = pointerPos(ev);
+    const markers = computeKeyframeMarkers(tracks, opts);
+    let best: KeyframeMarkerLayout | null = null;
+    let bestDist = hitRadius;
+    for (const m of markers) {
+      const rowIndex = tracks.indexOf(m.track);
+      const y = rowIndex * rowHeight + rowHeight / 2;
+      const dist = Math.hypot(px - m.x, py - y);
+      if (dist <= bestDist) {
+        best = m;
+        bestDist = dist;
+      }
+    }
+    dragging = best;
+  };
+
+  const onPointerMove = (ev: any): void => {
+    if (!dragging) return;
+    const [px] = pointerPos(ev);
+    dragging.keyframe.t = Math.max(0, pixelToTime(px, opts));
+    // Keep keyframes sorted, mirroring KeyframeTrack.addKeyframe()'s own
+    // invariant, so valueAt()'s binary-search-by-order assumption still holds.
+    dragging.track.keyframes.sort((a, b) => a.t - b.t);
+    opts.onChange?.();
+  };
+
+  const onPointerUp = (): void => {
+    if (!dragging) return;
+    dragging = null;
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(() => opts.onCommit?.(), commitDelayMs);
+  };
+
+  canvas.addEventListener?.("pointerdown", onPointerDown);
+  canvas.addEventListener?.("pointermove", onPointerMove);
+  canvas.addEventListener?.("pointerup", onPointerUp);
+  canvas.addEventListener?.("pointerleave", onPointerUp);
+
+  return {
+    detach(): void {
+      clearTimeout(commitTimer);
+      canvas.removeEventListener?.("pointerdown", onPointerDown);
+      canvas.removeEventListener?.("pointermove", onPointerMove);
+      canvas.removeEventListener?.("pointerup", onPointerUp);
+      canvas.removeEventListener?.("pointerleave", onPointerUp);
+    },
+  };
+}

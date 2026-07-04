@@ -98,6 +98,45 @@ which threads `props` into `Player.record(scene, { props })` again, re-running
 real file save still does a full `load()` + panel reset (the schema itself
 may have changed shape); the two triggers are kept structurally separate.
 
+### Property-keyframe tracks + a draggable timeline editor
+
+```js
+// In a Scene's construct():
+const radiusTrack = this.track([
+  { t: 0, value: 1 },
+  { t: 2, value: 3, ease: "easeInOutSine" },
+]);
+bindTrack(circle, "radius", radiusTrack); // rides on Mobject.update(dt) -- no Scene changes needed
+```
+`scene.track(keyframes)` (mirroring `addSound()`'s ergonomic) creates a
+`PlayableKeyframeTrack` — Cluster 2's `KeyframeTrack` plus absolute-time
+`tick(dt)`/`seek(t)`, kept in exact agreement so authoring playback and a
+Studio scrub can never drift apart. `bindTrack(mobject, prop, track)` writes
+`track.tick(dt)` into `mobject[prop]` every frame via the ordinary updater
+mechanism.
+
+For a draggable editor UI:
+```js
+import { attachKeyframeTimelineEditor, renderKeyframeTimeline } from "ecmanim/studio";
+
+const axis = { duration: player.duration, pixelWidth: canvas.width };
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  renderKeyframeTimeline(ctx, scene.keyframeTracks, axis);
+}
+redraw();
+attachKeyframeTimelineEditor(canvas, scene.keyframeTracks, {
+  ...axis,
+  onChange: redraw,                    // cheap visual update on every drag-move
+  onCommit: () => player.rerender(),   // rebake frames once, debounced, on release
+});
+```
+**Critical wiring detail**: `Player.frames[]` are frozen bitmaps — dragging a
+keyframe has no visible effect on already-recorded frames until a re-record
+happens. `onCommit` is exactly item 7's parameter-only re-render primitive
+(`player.rerender(...)`), debounced (default 150ms) so a drag gesture
+triggers one re-record on release, not one per pointer-move tick.
+
 ### Interactive camera (pan/zoom/orbit/pick)
 
 ```js

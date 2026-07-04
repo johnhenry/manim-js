@@ -5,6 +5,7 @@ import {
   timeToPixel, pixelToTime, frameToPixel, pixelToFrame,
   computeSectionThumbnails, renderSectionOverview, computeStepMarkers,
   computeWaveformBars, renderWaveform,
+  computeKeyframeMarkers, renderKeyframeTimeline, attachKeyframeTimelineEditor,
 } from "../src/studio/timeline.ts";
 
 test("timeToPixel / pixelToTime round-trip", () => {
@@ -107,4 +108,112 @@ test("renderWaveform draws one fillRect per bar and returns the same layout comp
   const [x0, y0] = calls[0];
   assert.equal(x0, 500 + bars[0].x);
   assert.equal(y0, 10 + 20 - bars[0].height / 2);
+});
+
+// --- keyframe timeline (item 8) ---------------------------------------------
+
+function makeFakeCanvas(): any {
+  const listeners = new Map<string, Set<(ev: any) => void>>();
+  return {
+    getBoundingClientRect() { return { left: 0, top: 0 }; },
+    addEventListener(type: string, fn: any) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(fn);
+    },
+    removeEventListener(type: string, fn: any) { listeners.get(type)?.delete(fn); },
+    dispatch(type: string, ev: any) { for (const fn of [...(listeners.get(type) ?? [])]) fn(ev); },
+  };
+}
+
+test("computeKeyframeMarkers positions one marker per keyframe, across all tracks", () => {
+  const trackA = { keyframes: [{ t: 0 }, { t: 5 }] };
+  const trackB = { keyframes: [{ t: 2.5 }] };
+  const markers = computeKeyframeMarkers([trackA, trackB], { duration: 10, pixelWidth: 100 });
+  assert.equal(markers.length, 3);
+  assert.deepEqual(markers.map((m) => m.x), [0, 50, 25]);
+  assert.equal(markers[0].track, trackA);
+  assert.equal(markers[2].track, trackB);
+});
+
+test("renderKeyframeTimeline draws one dot per keyframe, one row per track", () => {
+  const calls: any[] = [];
+  const fakeCtx = {
+    beginPath: () => calls.push("beginPath"),
+    arc: (...args: any[]) => calls.push(["arc", ...args]),
+    fill: () => calls.push("fill"),
+  };
+  const trackA = { keyframes: [{ t: 0 }, { t: 5 }] };
+  const trackB = { keyframes: [{ t: 2.5 }] };
+  const markers = renderKeyframeTimeline(fakeCtx, [trackA, trackB], { duration: 10, pixelWidth: 100, rowHeight: 20 });
+  assert.equal(markers.length, 3);
+  const arcCalls = calls.filter((c) => Array.isArray(c) && c[0] === "arc");
+  assert.equal(arcCalls.length, 3);
+  // trackB's single marker is drawn on row 1 (y = 1*20 + 10 = 30).
+  assert.equal(arcCalls[2][2], 30);
+});
+
+test("attachKeyframeTimelineEditor: dragging a keyframe marker updates its time", () => {
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  let changeCount = 0;
+  attachKeyframeTimelineEditor(canvas, [track], { ...axis, onChange: () => changeCount++ });
+
+  // The keyframe at t=5 sits at x=50, y=10 (single track, row 0).
+  canvas.dispatch("pointerdown", { clientX: 50, clientY: 10 });
+  canvas.dispatch("pointermove", { clientX: 80, clientY: 10 });
+  assert.ok(Math.abs(track.keyframes[0].t - 8) < 1e-6, `expected t~=8, got ${track.keyframes[0].t}`);
+  assert.equal(changeCount, 1);
+});
+
+test("attachKeyframeTimelineEditor: a pointerdown far from any marker starts no drag", () => {
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  let changeCount = 0;
+  attachKeyframeTimelineEditor(canvas, [track], { ...axis, onChange: () => changeCount++ });
+
+  canvas.dispatch("pointerdown", { clientX: 5, clientY: 5 }); // far from x=50
+  canvas.dispatch("pointermove", { clientX: 90, clientY: 5 });
+  assert.equal(track.keyframes[0].t, 5, "no drag should have started");
+  assert.equal(changeCount, 0);
+});
+
+test("attachKeyframeTimelineEditor: keyframes stay sorted while dragging past a neighbor", () => {
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 1 }, { t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  attachKeyframeTimelineEditor(canvas, [track], axis);
+
+  // Drag the keyframe at t=1 (x=10) past the one at t=5 (x=50).
+  canvas.dispatch("pointerdown", { clientX: 10, clientY: 10 });
+  canvas.dispatch("pointermove", { clientX: 80, clientY: 10 });
+  const times = track.keyframes.map((k) => k.t).sort((a, b) => a - b);
+  assert.deepEqual(track.keyframes.map((k) => k.t), times, "keyframes must remain t-sorted after a drag");
+});
+
+test("attachKeyframeTimelineEditor: onCommit fires once, debounced, after pointerup", () => {
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  let commits = 0;
+  attachKeyframeTimelineEditor(canvas, [track], { ...axis, onCommit: () => commits++, commitDelayMs: 10 });
+
+  canvas.dispatch("pointerdown", { clientX: 50, clientY: 10 });
+  canvas.dispatch("pointermove", { clientX: 60, clientY: 10 });
+  canvas.dispatch("pointerup", {});
+  assert.equal(commits, 0, "onCommit is debounced, not immediate");
+});
+
+test("attachKeyframeTimelineEditor.detach() removes all listeners", () => {
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  let changeCount = 0;
+  const handle = attachKeyframeTimelineEditor(canvas, [track], { ...axis, onChange: () => changeCount++ });
+  handle.detach();
+
+  canvas.dispatch("pointerdown", { clientX: 50, clientY: 10 });
+  canvas.dispatch("pointermove", { clientX: 80, clientY: 10 });
+  assert.equal(changeCount, 0, "detached editor must not respond to further drags");
 });

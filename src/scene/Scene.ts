@@ -7,6 +7,8 @@ import { Group } from "../mobject/Mobject.ts";
 import type { Camera } from "../renderer/CanvasRenderer.ts";
 import { TransformMatchingAuto } from "../animation/auto_matching.ts";
 import type { AutoMatchingConfig } from "../animation/auto_matching.ts";
+import { PlayableKeyframeTrack } from "../reactive/keyframes.ts";
+import type { Keyframe, KeyframeTrackOptions } from "../animation/keyframe_track.ts";
 
 /** A frame callback invoked once per frame with the top-level mobjects. */
 export type FrameHandler = (mobjects: Mobject[], frameCount: number, time: number) => void | Promise<void>;
@@ -67,6 +69,8 @@ export class Scene {
   time: number;
   frameCount: number;
   sounds: SceneSound[];
+  /** Property-keyframe tracks created via track() (mirrors sounds/sections). */
+  keyframeTracks: PlayableKeyframeTrack<any>[];
 
   // --- Sections (manim's next_section) ---
   sections: SceneSection[];
@@ -101,6 +105,7 @@ export class Scene {
     this.time = 0;
     this.frameCount = 0;
     this.sounds = [];
+    this.keyframeTracks = [];
     this.sections = [];
     this._sectionId = 0;
     this.playCount = 0;
@@ -234,6 +239,14 @@ export class Scene {
   addSound(file: string, { timeOffset, gain = 1 }: { timeOffset?: number; gain?: number } = {}): this {
     this.sounds.push({ file, time: timeOffset ?? this.time, gain });
     return this;
+  }
+
+  /** Create a property-keyframe track (mirrors addSound()'s ergonomic).
+   *  Bind it to a mobject property with bindTrack() (src/reactive/keyframes.ts). */
+  track<T = number>(keyframes: Keyframe<T>[], options?: KeyframeTrackOptions<T>): PlayableKeyframeTrack<T> {
+    const t = new PlayableKeyframeTrack<T>(keyframes, options);
+    this.keyframeTracks.push(t);
+    return t;
   }
 
   add(...mobs: (Mobject | Mobject[])[]): this {
