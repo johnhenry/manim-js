@@ -55,6 +55,8 @@ import * as changingAnim from "../animation/changing.ts";
 import * as specializedAnim from "../animation/specialized.ts";
 import * as complexVT from "../mobject/complex_value_tracker.ts";
 import { RATE_FUNCTIONS } from "../animation/rate_functions.ts";
+import { springRate } from "../animation/spring.ts";
+import { Easing } from "../animation/easing.ts";
 import * as colorMod from "../core/color.ts";
 
 const isSubclassOf = (v: any, base: any) =>
@@ -87,6 +89,18 @@ export function registerBuiltins(): typeof registry {
   for (const [name, fn] of Object.entries(RATE_FUNCTIONS)) {
     registry.registerRateFunction(name, fn as any);
   }
+  // "spring": a real, working spring easing (src/animation/spring.ts) that
+  // was previously exported standalone but never registered, so it couldn't
+  // be referenced by name anywhere a rate-function string is accepted. This
+  // is an fps=60 convenience default -- callers needing frame-accurate
+  // springs (matching a specific scene's durationInFrames) should still
+  // pass springRate(config, scene.fps) as a function directly.
+  registry.registerRateFunction("spring", springRate({}, 60));
+  // "bezier:x1,y1,x2,y2": any custom cubic-bezier curve (src/animation/
+  // easing.ts, previously its own disconnected system with no name-based
+  // lookup) referenceable anywhere a rate-function string is accepted, with
+  // no per-curve registration step.
+  registry.registerRateFunctionFactory("bezier", (x1, y1, x2, y2) => Easing.bezier(x1, y1, x2, y2));
 
   for (const [name, value] of Object.entries(colorMod)) {
     if (typeof value === "string" && value.startsWith("#")) registry.registerColor(name, value);

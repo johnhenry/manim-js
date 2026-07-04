@@ -3,6 +3,8 @@
 // + stroke + pacing) or a social aspect ratio by name. Applied by the Node
 // backend's render() alongside QUALITY_PRESETS. Isomorphic (pure data + helpers).
 
+import { registry } from "../plugins/registry.ts";
+
 /** A named visual theme. `palette` is an ordered list of accent colors. */
 export interface StylePreset {
   name: string;
@@ -99,10 +101,26 @@ export const ASPECT_RATIO_PRESETS: Record<string, AspectRatioPreset> = {
   "21:9": { label: "cinema", pixelWidth: 2560, pixelHeight: 1080 },
 };
 
-/** Resolve a style preset by name (case-insensitive). Returns undefined if unknown. */
+/**
+ * Resolve a style preset by name (case-insensitive) -- registry-registered
+ * presets (see registerStylePreset()/registry.stylePresets) first, so a
+ * plugin can override a built-in name, then the built-in STYLE_PRESETS map.
+ * Returns undefined if unknown.
+ */
 export function resolveStyle(name?: string): StylePreset | undefined {
   if (!name) return undefined;
-  return STYLE_PRESETS[name] ?? STYLE_PRESETS[name.toLowerCase()];
+  return registry.stylePresets.get(name) ?? registry.stylePresets.get(name.toLowerCase())
+    ?? STYLE_PRESETS[name] ?? STYLE_PRESETS[name.toLowerCase()];
+}
+
+/**
+ * Register a custom style preset (or override a built-in one) so it can be
+ * resolved by name via resolveStyle() alongside the built-in STYLE_PRESETS,
+ * matching the plugin-registry pattern already used for colors/rate-
+ * functions/mobjects.
+ */
+export function registerStylePreset(name: string, preset: StylePreset): void {
+  registry.registerStylePreset(name, preset);
 }
 
 /**

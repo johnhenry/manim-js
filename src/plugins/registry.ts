@@ -4,6 +4,7 @@
 // works identically in Node and the unbundled browser (no filesystem discovery).
 
 import type { RateFunc } from "../core/types.ts";
+import type { StylePreset } from "../core/presets.ts";
 
 export type RegistryKind = "mobject" | "animation" | "rateFunction" | "color" | "renderer" | "scene";
 
@@ -19,9 +20,14 @@ export class Registry {
   mobjects = new Map<string, any>();
   animations = new Map<string, any>();
   rateFunctions = new Map<string, RateFunc>();
+  /** Parameterized rate-function factories, e.g. registerRateFunctionFactory("backOut", overshoot => ...)
+   *  resolved via running("backOut:2")-style colon-suffixed names (see rate_functions.ts). */
+  rateFunctionFactories = new Map<string, (...args: number[]) => RateFunc>();
   colors = new Map<string, string>();
   renderers = new Map<string, any>();
   scenes = new Map<string, any>();
+  /** Named style/theme presets, extending core/presets.ts's built-in STYLE_PRESETS. */
+  stylePresets = new Map<string, StylePreset>();
   plugins: Plugin[] = [];
   /** Base classes exposed to plugin authors so they can extend without deep imports. */
   bases: Record<string, any> = {};
@@ -45,9 +51,14 @@ export class Registry {
   registerMobject(name: string, cls: any): this { this.mobjects.set(name, cls); return this; }
   registerAnimation(name: string, cls: any): this { this.animations.set(name, cls); return this; }
   registerRateFunction(name: string, fn: RateFunc): this { this.rateFunctions.set(name, fn); return this; }
+  registerRateFunctionFactory(name: string, factory: (...args: number[]) => RateFunc): this {
+    this.rateFunctionFactories.set(name, factory);
+    return this;
+  }
   registerColor(name: string, value: string): this { this.colors.set(name, value); return this; }
   registerRenderer(name: string, factory: any): this { this.renderers.set(name, factory); return this; }
   registerScene(name: string, cls: any): this { this.scenes.set(name, cls); return this; }
+  registerStylePreset(name: string, preset: StylePreset): this { this.stylePresets.set(name, preset); return this; }
 
   get(kind: RegistryKind, name: string): any { return this.mapFor(kind).get(name); }
   has(kind: RegistryKind, name: string): boolean { return this.mapFor(kind).has(name); }

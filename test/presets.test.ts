@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  STYLE_PRESETS, ASPECT_RATIO_PRESETS, resolveStyle, resolveAspectRatio,
+  STYLE_PRESETS, ASPECT_RATIO_PRESETS, resolveStyle, resolveAspectRatio, registerStylePreset,
 } from "../src/core/presets.ts";
+import { registry } from "../src/plugins/registry.ts";
 
 test("STYLE_PRESETS includes 3b1b-dark with a palette + dark background", () => {
   const s = STYLE_PRESETS["3b1b-dark"];
@@ -40,4 +41,33 @@ test("arbitrary W:H ratio is accepted; junk returns undefined", () => {
   assert.deepEqual(d, { pixelWidth: 2160, pixelHeight: 1080 });
   assert.equal(resolveAspectRatio("banana"), undefined);
   assert.equal(resolveAspectRatio(undefined), undefined);
+});
+
+test("registerStylePreset() makes a custom preset resolvable by name", () => {
+  try {
+    assert.equal(resolveStyle("__test_custom_preset__"), undefined);
+    registerStylePreset("__test_custom_preset__", {
+      name: "__test_custom_preset__",
+      background: "#123456",
+      palette: ["#ffffff"],
+    });
+    const resolved = resolveStyle("__test_custom_preset__");
+    assert.equal(resolved?.background, "#123456");
+  } finally {
+    registry.stylePresets.delete("__test_custom_preset__"); // don't leak into other test files
+  }
+});
+
+test("a registered style preset can override a built-in name", () => {
+  try {
+    registry.registerStylePreset("3b1b-dark", {
+      name: "3b1b-dark",
+      background: "#ABCDEF",
+      palette: ["#000000"],
+    });
+    assert.equal(resolveStyle("3b1b-dark")?.background, "#ABCDEF");
+  } finally {
+    registry.stylePresets.delete("3b1b-dark"); // restore built-in lookup for other tests
+    assert.equal(resolveStyle("3b1b-dark")?.background, STYLE_PRESETS["3b1b-dark"].background);
+  }
 });

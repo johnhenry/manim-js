@@ -231,8 +231,27 @@ export const easeInOutBounce = (t: number): number =>
 
 export function running(name: RateFunc | string): RateFunc {
   if (typeof name === "function") return name;
-  // Built-ins first, then any plugin-registered rate function, else smooth.
-  return RATE_FUNCTIONS[name] ?? registry.rateFunctions.get(name) ?? smooth;
+  // Registry first, then built-ins, else smooth. Flipping the old built-ins-
+  // first precedence is safe: registerBuiltins() already copies every
+  // RATE_FUNCTIONS entry into the registry, so for any built-in name both
+  // resolve to the SAME function object -- this only changes behavior when a
+  // plugin deliberately registers an override for a built-in name (new
+  // capability, not a regression).
+  const direct = registry.rateFunctions.get(name) ?? RATE_FUNCTIONS[name];
+  if (direct) return direct;
+  // Parameterized factory: "name:1,2" -> registry.rateFunctionFactories
+  // .get("name")(1, 2). Lets a plugin-registered (or built-in, e.g. "spring"/
+  // "bezier") factory be referenced anywhere a plain rate-function string is
+  // accepted, without a bespoke per-factory config shape.
+  const sep = name.indexOf(":");
+  if (sep > 0) {
+    const factory = registry.rateFunctionFactories.get(name.slice(0, sep));
+    if (factory) {
+      const args = name.slice(sep + 1).split(",").map(Number);
+      return factory(...args);
+    }
+  }
+  return smooth;
 }
 
 export const RATE_FUNCTIONS: Record<string, RateFunc> = {
