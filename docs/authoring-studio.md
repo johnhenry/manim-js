@@ -76,12 +76,27 @@ Serves your Scene in a `<manim-player>` and re-imports + re-renders on every sav
 (file-watch + Server-Sent Events, dependency-free).
 
 **What Studio is today, honestly:** the hot-reload dev server, the interactive
-camera controller, `<manim-chart>`, and the `schemaToControls` data layer —
-that's it. The heavier features you might expect from a "studio" are **not
-implemented**: no checkpoint replay (every save re-renders the whole scene
-from scratch), no in-page eval REPL, and no rendered props-panel UI (only the
-control *descriptors* exist; nothing draws them). These are planned on top of
-this foundation.
+camera controller, `<manim-chart>`, a rendered props panel (`{ props: true }`,
+wired to parameter-only re-render — see below), and a waveform strip
+(`{ waveform: true }`). Still **not implemented**: checkpoint replay (every
+save, and every props-panel edit, re-renders the whole scene from scratch —
+see the render-caching item for why that matters for scrub UX) and an
+in-page eval REPL.
+
+### Props panel + parameter-only re-render
+
+```js
+import { startStudio } from "ecmanim/studio";
+await startStudio({ sceneModule: "scenes/demo.js", props: true });
+```
+When the scene exports a `static schema` (via `defineSchema`), the harness
+renders one control per field (via `schemaToControls`), pre-filled from the
+schema's own defaults. Editing a control (debounced 80ms) calls
+`schema.safeParse()` and, on success, `<manim-player>.rerender(props)` —
+which threads `props` into `Player.record(scene, { props })` again, re-running
+`construct()` with the new values WITHOUT re-`import()`ing the module. A
+real file save still does a full `load()` + panel reset (the schema itself
+may have changed shape); the two triggers are kept structurally separate.
 
 ### Interactive camera (pan/zoom/orbit/pick)
 

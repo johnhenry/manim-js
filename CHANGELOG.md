@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **Rendered props panel** (`startStudio({ props: true })`): draws one
+  control per `schemaToControls()` descriptor, pre-filled from the schema's
+  own defaults. Edits are debounced (80ms) and re-render via
+  `<manim-player>.rerender(props)` → `Player.record(scene, { props })`
+  (parameter-only re-render, no re-`import()`), validated through
+  `schema.safeParse()` first. A real file-save reload still does a full
+  `load()` + panel reset; the two triggers are kept structurally separate
+  (a rerender-triggered "ready" event carries the same schema object, so it
+  doesn't reset the panel).
 - **Waveform visualization** (`startStudio({ waveform: true })`): draws a
   bar-chart waveform strip below the live preview for each of the scene's
   `addSound()`-scheduled sounds, positioned on the shared timeline via

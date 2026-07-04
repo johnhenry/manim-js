@@ -319,12 +319,21 @@ function buildElementClass(): any {
       this._recording = null;
     }
 
-    _record(): void {
+    /**
+     * Re-run the current scene with new props (Studio props-panel edits),
+     * WITHOUT re-`import()`ing the module -- unlike a file-save reload,
+     * this does not touch `this._scene` or reset the panel to defaults.
+     */
+    rerender(props: any): void {
+      this._record(props);
+    }
+
+    _record(props?: any): void {
       if (!this._player || this._scene == null) return;
       this._ready = false;
       const scene = this._scene;
       const rec = this._player
-        .record(scene)
+        .record(scene, { props })
         .then(() => {
           this._ready = true;
           this._syncScrubber();

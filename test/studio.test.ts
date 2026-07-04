@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildStudioHarness, startStudio } from "../src/studio/dev_server.ts";
 import { schemaToControls } from "../src/studio/props.ts";
+import { defineSchema } from "../src/core/schema.ts";
 
 test("buildStudioHarness embeds importmap, scene import, player, and SSE reload", () => {
   const html = buildStudioHarness({ sceneModuleUrl: "/scene.js", sceneExport: "default", browserUrl: "/dist/browser.js", studioUrl: "/dist/studio.js", quality: "medium", background: "#000", interactive: false });
@@ -28,6 +29,20 @@ test("buildStudioHarness({ waveform: true }) adds a waveform canvas + audio wiri
   assert.ok(!/undefined/.test(withWaveform));
 });
 
+test("buildStudioHarness({ props: true }) adds a props panel + schema-driven rerender wiring, opt-in", () => {
+  const base = { sceneModuleUrl: "/scene.js", sceneExport: "default", browserUrl: "/dist/browser.js", studioUrl: "/dist/studio.js", quality: "medium", background: "#000", interactive: false };
+  const withoutProps = buildStudioHarness(base);
+  assert.ok(!/id="props"/.test(withoutProps));
+  assert.ok(!/undefined/.test(withoutProps));
+
+  const withProps = buildStudioHarness({ ...base, props: true });
+  assert.match(withProps, /id="props"/);
+  assert.match(withProps, /schemaToControls/);
+  assert.match(withProps, /safeParse/);
+  assert.match(withProps, /el\.rerender/);
+  assert.ok(!/undefined/.test(withProps));
+});
+
 test("schemaToControls maps field types to controls", () => {
   const schema = { spec: {
     title: { type: "string", default: "hi", description: "the title" },
@@ -46,6 +61,30 @@ test("schemaToControls maps field types to controls", () => {
   assert.equal(by.accent.control, "color");
   assert.equal(by.mode.control, "select");
   assert.deepEqual(by.mode.options, ["a", "b"]);
+});
+
+test("schema-to-values round-trip: schemaToControls' defaults match schema.safeParse({})'s applied defaults", () => {
+  const schema = defineSchema({
+    title: { type: "string", default: "hi" },
+    size: { type: "number", min: 1, max: 10, default: 5 },
+    dark: { type: "boolean", default: true },
+  });
+  const controls = schemaToControls(schema);
+  const defaults = Object.fromEntries(controls.map((c) => [c.name, c.default]));
+
+  const applied = schema.safeParse({});
+  assert.equal(applied.ok, true);
+  if (applied.ok) assert.deepEqual(applied.value, defaults);
+
+  // A panel edit (changing "size") still round-trips through safeParse().
+  const edited = { ...defaults, size: 8 };
+  const result = schema.safeParse(edited);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.size, 8);
+
+  // An out-of-range edit is rejected, not silently clamped.
+  const invalid = schema.safeParse({ ...defaults, title: 42 });
+  assert.equal(invalid.ok, false);
 });
 
 test("startStudio serves the harness and closes cleanly", async () => {
