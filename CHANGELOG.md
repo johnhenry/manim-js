@@ -18,6 +18,34 @@
   the target itself was never explicitly added — so cleanup after a diff
   needs to fade out both the source and target `Code` instances, not just
   the source.
+- **`sampleSceneAt(sceneOrConstruct, targetTime, config?)`** (`src/scene/orchestrate.ts`):
+  replays a Scene's `construct()` from the start and stops as soon as the
+  scene's own simulated clock reaches `targetTime`, returning the driven
+  Scene so its mobjects reflect the interpolated state at that moment — the
+  primitive that lets a Scene's animation be scrubbed or embedded elsewhere
+  (e.g. a compositing tool) without a full render. `isSceneLike`/`makeScene`/
+  `runConstruct` (the shared Scene-vs-bare-construct-function handling
+  already used internally by every backend) are now exported alongside it.
+- **`glyphsFromDomSvg(svgElement, config?)`** (`src/mobject/mathtex.ts`):
+  builds MathTex glyph VMobjects directly from a real browser `<svg>`
+  Element, via a small `domAdaptor` shim over mathjax-full's internal
+  glyph-collection logic. Lets `MathTex` work with CDN-loaded MathJax's
+  `tex2svg()` (real DOM output) in addition to the existing Node/lite-adaptor
+  path, so vector MathTex now renders correctly in-browser.
+- **ecmanim Compositor** (`examples/compositor/`): a browser-based visual
+  scene-compositing/animation editor — layers/canvas/inspector/timeline
+  editing, onion skinning, keyboard transport shortcuts, a Scene Settings
+  panel (duration/fps/aspect/background), keyframe snapping to the frame
+  grid, an independent play-range/loop marker, undo/redo, and an "export to
+  ecmanim source" generator. Supports Circle/Square/Rectangle/Ellipse/Dot/
+  Line/Arrow/Star/Polygon/Text/MathTex/Graph/Code/Scene/Sound layers, with
+  universal animatable Rotation/Scale on every layer type. A Graph layer's
+  expression can be driven by an animatable `k` variable and can cross-fade
+  (tween) between two expressions' sampled curves. Serve via
+  `node --experimental-strip-types examples/compositor/serve.ts`.
+- **`examples/studio-demo/`**: a runnable Studio dev-server example
+  (`FunctionExplorerScene`) demonstrating `defineSchema`/props, named camera
+  stops, and a property-keyframe track driving a live marker pulse.
 
 ### Fixed
 - **`FlexGroup`'s `flexGrow`/`flexShrink` now actually resize the child**
@@ -102,6 +130,12 @@
   gracefully (matching the file's existing "degrade don't fail" style)
   when it doesn't, instead of failing on environments with a different
   system font.
+- **`attachKeyframeTimelineEditor`'s drag lost tracking when the pointer left
+  the canvas mid-drag** (`src/studio/timeline.ts`) — rows are ~20px tall, so
+  a horizontal drag very easily overshoots the canvas's vertical bounds.
+  Now captures the pointer on drag start (`setPointerCapture`) so
+  move/up keep targeting the canvas even outside its box, and no longer ends
+  the drag on `pointerleave`.
 
 ## 0.0.12
 

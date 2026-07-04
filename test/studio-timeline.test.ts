@@ -205,6 +205,27 @@ test("attachKeyframeTimelineEditor: onCommit fires once, debounced, after pointe
   assert.equal(commits, 0, "onCommit is debounced, not immediate");
 });
 
+test("attachKeyframeTimelineEditor: a drag survives the pointer leaving the canvas bounds", () => {
+  // Rows are ~20px tall, so a horizontal drag very easily overshoots the
+  // canvas's vertical extent -- the editor must keep tracking the drag via
+  // pointer capture rather than dropping it on pointerleave.
+  const canvas = makeFakeCanvas();
+  const track = { keyframes: [{ t: 5 }] };
+  const axis = { duration: 10, pixelWidth: 100, rowHeight: 20 };
+  let changeCount = 0;
+  attachKeyframeTimelineEditor(canvas, [track], { ...axis, onChange: () => changeCount++ });
+
+  canvas.dispatch("pointerdown", { clientX: 50, clientY: 10 });
+  canvas.dispatch("pointerleave", { clientX: 50, clientY: -40 });
+  canvas.dispatch("pointermove", { clientX: 80, clientY: -40 });
+  assert.ok(Math.abs(track.keyframes[0].t - 8) < 1e-6, "drag must still apply after pointerleave");
+  assert.equal(changeCount, 1);
+
+  canvas.dispatch("pointerup", {});
+  canvas.dispatch("pointermove", { clientX: 20, clientY: 10 });
+  assert.equal(track.keyframes[0].t, 8, "pointerup must still end the drag");
+});
+
 test("attachKeyframeTimelineEditor.detach() removes all listeners", () => {
   const canvas = makeFakeCanvas();
   const track = { keyframes: [{ t: 5 }] };

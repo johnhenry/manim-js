@@ -54,3 +54,49 @@ export async function runConstruct(sceneOrConstruct: any, scene: Scene, props?: 
     await scene.render();
   }
 }
+
+// Private sentinel: distinguishes "we deliberately stopped construct() at the
+// target time" from a real error thrown by the scene's own construct() code,
+// so sampleSceneAt() only swallows its own signal and lets everything else
+// propagate normally.
+class SceneScrubStop {
+  time: number;
+  constructor(time: number) {
+    this.time = time;
+  }
+}
+
+/**
+ * Run sceneOrConstruct's construct() from the very beginning, stopping as
+ * soon as the scene's own simulated clock (Scene.time, advanced once per
+ * frame inside play()/wait()) reaches `targetTime` seconds, and return the
+ * driven Scene -- `scene.mobjects` reflects the interpolated state at
+ * whichever frame boundary is at-or-just-past targetTime (frame-quantized,
+ * the same way any rendered output is).
+ *
+ * This does NOT render any pixels (frameHandler is a no-op besides the time
+ * check) -- it's a pure "replay the construct() script and tell me where
+ * everything was at time t" query, for embedding/scrubbing a scene's
+ * animation elsewhere (e.g. a compositing tool) without a full render.
+ *
+ * construct() is a sequential script (a manim-style "do X for N seconds,
+ * then do Y") -- there is no way to "jump into the middle" without
+ * re-running everything up to that point, so this re-executes construct()
+ * from scratch on every call. Each frame's play()/wait() work is cheap (no
+ * real rendering happens before the cutoff), so this is fine for
+ * scrubbing/previewing, but isn't meant for a hot per-video-frame render
+ * loop -- pass `targetTime: Infinity` to run to completion once and read
+ * the final `scene.time` as the scene's total duration.
+ */
+export async function sampleSceneAt(sceneOrConstruct: any, targetTime: number, config: any = {}): Promise<Scene> {
+  const scene = makeScene(sceneOrConstruct, config);
+  scene.frameHandler = async (_mobjects, _frameCount, time) => {
+    if (time >= targetTime) throw new SceneScrubStop(time);
+  };
+  try {
+    await runConstruct(sceneOrConstruct, scene, config.props);
+  } catch (e) {
+    if (!(e instanceof SceneScrubStop)) throw e;
+  }
+  return scene;
+}

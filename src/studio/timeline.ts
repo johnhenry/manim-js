@@ -248,6 +248,12 @@ export function attachKeyframeTimelineEditor(
       }
     }
     dragging = best;
+    // Rows are typically ~20px tall, so a horizontal drag very easily
+    // overshoots the canvas's vertical bounds -- capture the pointer so
+    // move/up keep targeting this canvas even outside its box (pointerleave
+    // fires regardless of capture, which is why it's NOT wired to end the
+    // drag below; only a real pointerup does).
+    if (dragging) canvas.setPointerCapture?.(ev.pointerId);
   };
 
   const onPointerMove = (ev: any): void => {
@@ -260,8 +266,9 @@ export function attachKeyframeTimelineEditor(
     opts.onChange?.();
   };
 
-  const onPointerUp = (): void => {
+  const onPointerUp = (ev: any): void => {
     if (!dragging) return;
+    canvas.releasePointerCapture?.(ev?.pointerId);
     dragging = null;
     clearTimeout(commitTimer);
     commitTimer = setTimeout(() => opts.onCommit?.(), commitDelayMs);
@@ -270,7 +277,6 @@ export function attachKeyframeTimelineEditor(
   canvas.addEventListener?.("pointerdown", onPointerDown);
   canvas.addEventListener?.("pointermove", onPointerMove);
   canvas.addEventListener?.("pointerup", onPointerUp);
-  canvas.addEventListener?.("pointerleave", onPointerUp);
 
   return {
     detach(): void {
@@ -278,7 +284,6 @@ export function attachKeyframeTimelineEditor(
       canvas.removeEventListener?.("pointerdown", onPointerDown);
       canvas.removeEventListener?.("pointermove", onPointerMove);
       canvas.removeEventListener?.("pointerup", onPointerUp);
-      canvas.removeEventListener?.("pointerleave", onPointerUp);
     },
   };
 }

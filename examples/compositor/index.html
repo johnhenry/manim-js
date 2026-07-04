@@ -1,0 +1,2391 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ecmanim Compositor</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1b1f26;
+    --panel-alt: #20242c;
+    --border: #2a2f38;
+    --text: #d7dbe0;
+    --text-dim: #7b8290;
+    --accent: #58c4dd;
+    --accent-dim: #2f5a68;
+    --track: #f6ad55;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+  header h1 { font-size: 13px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: 0.02em; }
+  header .spacer { flex: 1; }
+  button { font: inherit; color: var(--text); background: var(--panel-alt); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); }
+  button.icon { padding: 4px 8px; }
+  select { font: inherit; color: var(--text); background: var(--panel-alt); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 8px; }
+
+  main { flex: 1 1 auto; display: flex; min-height: 0; }
+
+  #layers { width: 190px; flex: 0 0 auto; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; }
+  #layers .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); }
+  #layers .panel-head span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  #layer-list { flex: 1; overflow-y: auto; padding: 4px; }
+  .layer-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer;
+    color: var(--text-dim); }
+  .layer-row:hover { background: var(--panel-alt); }
+  .layer-row.selected { background: var(--accent-dim); color: var(--text); }
+  .layer-row.not-visible { opacity: 0.45; }
+  .layer-row .swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+  .layer-row .swatch-icon { width: auto; height: auto; font-size: 9px; line-height: 1; color: var(--text-dim); }
+  .layer-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layer-row .del { opacity: 0; background: none; border: none; color: var(--text-dim); padding: 0 4px; }
+  .layer-row:hover .del { opacity: 1; }
+  .layer-row.dragging { opacity: 0.4; }
+  .layer-row .rename-input { flex: 1; min-width: 0; background: var(--panel-alt); border: 1px solid var(--accent);
+    color: var(--text); border-radius: 3px; padding: 1px 4px; font: inherit; }
+
+  #canvas-wrap { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; background: #0a0c0f;
+    min-width: 0; position: relative; }
+  #stage { background: #0d1117; box-shadow: 0 0 0 1px var(--border); cursor: default;
+    max-width: 100%; max-height: 100%; object-fit: contain; }
+
+  #inspector { width: 240px; flex: 0 0 auto; background: var(--panel); border-left: 1px solid var(--border);
+    overflow-y: auto; }
+  #inspector .panel-head { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  #inspector .panel-head .obj-name { font-weight: 600; }
+  #inspector .panel-head .obj-type { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  #inspector-fields { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+  .field-row { display: flex; align-items: center; gap: 8px; }
+  .field-row label { width: 62px; flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+  .field-row input[type="number"], .field-row input[type="text"] {
+    flex: 1; min-width: 0; background: var(--panel-alt); border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 4px 6px; font: inherit; }
+  .field-row input[type="range"] { flex: 1; }
+  .field-row input[type="color"] { width: 32px; height: 24px; padding: 0; border: 1px solid var(--border);
+    border-radius: 4px; background: none; }
+  .anim-toggle { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--panel-alt); color: var(--text-dim); font-size: 11px; line-height: 1; display: flex;
+    align-items: center; justify-content: center; padding: 0; }
+  .anim-toggle.active { background: var(--track); border-color: var(--track); color: #1b1f26; }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim);
+    margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
+  #empty-hint { padding: 20px 14px; color: var(--text-dim); line-height: 1.5; }
+
+  .code-editor { width: 100%; min-height: 130px; background: var(--panel-alt); border: 1px solid var(--border);
+    color: var(--text); border-radius: 4px; padding: 8px; font: 11px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+    resize: vertical; }
+  .code-error { font-size: 11px; color: #e0785c; min-height: 1.2em; white-space: pre-wrap; }
+  .sound-file-btn { width: 100%; }
+  .sound-file-name { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #timeline { flex: 0 0 auto; height: 240px; background: var(--panel); border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; }
+  #timeline .transport { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  #timeline .transport .time { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12px; }
+  #timeline .transport .spacer { flex: 1; }
+  #timeline-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .ruler-row { flex: 0 0 auto; display: flex; }
+  .ruler-spacer { width: 120px; flex: 0 0 auto; border-right: 1px solid var(--border); background: var(--panel); }
+  /* Canvas CSS size is pinned exactly to its drawing-buffer resolution
+     (width attr + kfCanvas.height, kept in sync in JS) -- a canvas flex item
+     with only overflow-y:auto on its container (which per the CSS Overflow
+     spec computes overflow-x to auto too) can otherwise get stretched by the
+     UA well past its actual resolution, desyncing pointer math from what's
+     drawn. flex: none opts fully out of grow/shrink so the explicit size wins. */
+  #ruler { display: block; flex: none; width: 760px; }
+  #tracks-scroll { flex: 1; display: flex; align-items: flex-start; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  #track-labels { width: 120px; flex: 0 0 auto; border-right: 1px solid var(--border); }
+  #keyframe-canvas { display: block; cursor: pointer; flex: none; width: 760px; }
+
+  .tl-row { height: 22px; box-sizing: border-box; display: flex; align-items: center; font-size: 11px;
+    color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .tl-header { color: var(--text); font-weight: 600; padding-left: 2px; background: var(--panel-alt); }
+  .tl-header.selected { background: var(--accent-dim); }
+  .tl-header .caret { width: 16px; flex: 0 0 auto; text-align: center; color: var(--text-dim); }
+  .tl-track { padding-left: 24px; cursor: default; }
+
+  #export-modal, #settings-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none;
+    align-items: center; justify-content: center; z-index: 10; }
+  #export-modal.open, #settings-modal.open { display: flex; }
+  .sheet { width: min(720px, 90vw); max-height: 80vh; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+  .sheet-head { display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .sheet-head span { font-weight: 600; }
+  .sheet-head .spacer { flex: 1; }
+  #export-code { margin: 0; padding: 14px; overflow: auto; font: 12px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+    color: var(--text); white-space: pre; }
+
+  .settings-sheet { width: min(420px, 90vw); }
+  .settings-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .settings-body .field-row label { width: 90px; }
+  .settings-body input[type="number"] { width: 70px; flex: 0 0 auto; background: var(--panel-alt);
+    border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  .settings-body input[type="color"] { width: 40px; height: 26px; padding: 0; border: 1px solid var(--border);
+    border-radius: 4px; background: none; }
+  .field-hint { font-size: 11px; color: var(--text-dim); }
+  #onion-btn.active, #loop-btn.active { background: var(--track); border-color: var(--track); color: #1b1f26; }
+  #undo-btn:disabled, #redo-btn:disabled { opacity: 0.35; cursor: default; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>ecmanim Compositor</h1>
+    <div class="spacer"></div>
+    <button id="onion-btn" title="Onion skinning: ghost the previous/next frame while scrubbing">◐ Onion skin</button>
+    <button id="scene-settings-btn">⚙ Scene settings</button>
+    <button id="export-btn">Export scene code</button>
+  </header>
+  <main>
+    <div id="layers">
+      <div class="panel-head">
+        <span>Layers</span>
+        <select id="add-type">
+          <option value="" disabled selected>+ Add</option>
+          <optgroup label="Shapes">
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="ellipse">Ellipse</option>
+            <option value="dot">Dot</option>
+            <option value="line">Line</option>
+            <option value="arrow">Arrow</option>
+            <option value="star">Star</option>
+            <option value="polygon">Polygon</option>
+          </optgroup>
+          <optgroup label="Text &amp; math">
+            <option value="text">Text</option>
+            <option value="mathtex">Math (TeX)</option>
+          </optgroup>
+          <optgroup label="Data">
+            <option value="graph">Graph f(x)</option>
+          </optgroup>
+          <optgroup label="Advanced">
+            <option value="code">Code</option>
+            <option value="scene">Scene</option>
+            <option value="sound">Sound</option>
+          </optgroup>
+        </select>
+      </div>
+      <div id="layer-list"></div>
+    </div>
+    <div id="canvas-wrap">
+      <canvas id="stage" width="960" height="540"></canvas>
+    </div>
+    <div id="inspector">
+      <div class="panel-head">
+        <div class="obj-name" id="inspector-name">No selection</div>
+        <div class="obj-type" id="inspector-type"></div>
+      </div>
+      <div id="inspector-fields"></div>
+      <div id="empty-hint" style="display:none">Click a layer, or add one from the panel on the left.</div>
+    </div>
+  </main>
+  <div id="timeline">
+    <div class="transport">
+      <button id="play-btn">&#9654; Play</button>
+      <button id="loop-btn" title="Loop the play range (drag the ruler's end markers to set one)">&#8635; Loop</button>
+      <span class="time"><span id="time-readout">0.00</span>s / <span id="duration-readout">6.00</span>s</span>
+      <div class="spacer"></div>
+      <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)">&#8630;</button>
+      <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)">&#8631;</button>
+      <span style="color:var(--text-dim);font-size:11px">drag a dot to retime &middot; drag a layer's bar to set when it appears &middot; &#9670; animates a property</span>
+    </div>
+    <div id="timeline-body">
+      <div class="ruler-row">
+        <div class="ruler-spacer"></div>
+        <canvas id="ruler" width="760" height="20"></canvas>
+      </div>
+      <div id="tracks-scroll">
+        <div id="track-labels"></div>
+        <canvas id="keyframe-canvas" width="760" height="140"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="export-modal">
+  <div class="sheet">
+    <div class="sheet-head">
+      <span>Exported scene code</span>
+      <div class="spacer"></div>
+      <button id="copy-code-btn">Copy</button>
+      <button id="close-export-btn" class="icon">✕</button>
+    </div>
+    <pre id="export-code"></pre>
+  </div>
+</div>
+
+<div id="settings-modal">
+  <div class="sheet settings-sheet">
+    <div class="sheet-head">
+      <span>Scene settings</span>
+      <div class="spacer"></div>
+      <button id="close-settings-btn" class="icon">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="section-label" style="margin-top:0;padding-top:0;border-top:none">Timing</div>
+      <div class="field-row">
+        <label>Duration</label>
+        <input type="checkbox" id="duration-auto" title="Fit the duration to whatever content needs">
+        <input type="number" id="duration-value" step="0.5" min="0.5">
+        <span class="field-hint">Auto</span>
+      </div>
+      <div class="field-row">
+        <label>Frame rate</label>
+        <input type="number" id="fps-value" step="1" min="1" max="120">
+        <span class="field-hint">fps</span>
+      </div>
+
+      <div class="section-label">Frame</div>
+      <div class="field-row">
+        <label>Preset</label>
+        <select id="aspect-preset" style="flex:1">
+          <option value="16:9">16:9 Landscape (960×540)</option>
+          <option value="9:16">9:16 Portrait (540×960)</option>
+          <option value="1:1">1:1 Square (720×720)</option>
+          <option value="4:3">4:3 Classic (960×720)</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>Size</label>
+        <input type="number" id="width-value" step="10" min="64">
+        <span class="field-hint">×</span>
+        <input type="number" id="height-value" step="10" min="64">
+        <span class="field-hint">px</span>
+      </div>
+      <div class="field-row">
+        <label>Background</label>
+        <input type="color" id="background-value">
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import {
+  Circle, Square, Dot, Text, Camera, CanvasRenderer, Color,
+  KeyframeTrack, Line, Arrow, Star, Ellipse, Rectangle, RegularPolygon, Axes, VGroup, initMathTex, MathTex,
+  getAudioData, getWaveformPortion, sampleSceneAt,
+} from "/dist/browser.js";
+// The full namespace, handed to user-authored "Code" layers (see the code
+// layer type below) so a snippet can reach any ecmanim export (MathTex,
+// Axes, custom VGroups, ...) without this app needing to enumerate them.
+import * as EcmanimNS from "/dist/browser.js";
+import {
+  pickAt, computeWaveformBars,
+  timeToPixel, pixelToTime,
+} from "/dist/studio.js";
+
+// MathTex needs MathJax initialized before any instance is constructed
+// (texToSVG/initMathTex -- see src/mobject/mathtex.ts). A blocking top-level
+// await is fine for a local authoring tool: the whole page waits under a
+// second before any UI wiring runs, and every MathTex/Code layer can then
+// assume it's ready.
+//
+// Vector MathTex's glyph builder now has two backends: mathjax-full's
+// liteAdaptor (Node, resolved via isNode() gating on `document` being
+// undefined) and, when that import can't resolve (an unbundled browser page
+// like this one), a CDN-loaded MathJax + a real-DOM glyph walker
+// (domAdaptor/glyphsFromDomSvg in src/mobject/mathtex.ts) that extracts the
+// SAME glyph outlines from CDN MathJax's actual <svg> output. Both this
+// preview and the exported scene code (generateSceneCode(), below) can now
+// use the real vector MathTex uniformly -- no raster fallback needed.
+await initMathTex();
+
+// ---------------------------------------------------------------------------
+// Document model: plain objects + optional per-property KeyframeTrack. Not
+// ecmanim's Scene/construct() model (that's an instruction script executed
+// once forward in time) -- this is a scrubbable, edit-anywhere document, so
+// every object is rebuilt from its effective properties on every render.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// OKLab color interpolation (CSS Color 4's "OK" color spaces): naive sRGB hex
+// lerp desaturates through a muddy grey at the midpoint (e.g. blue->yellow
+// crosses near grey), because sRGB isn't perceptually uniform. OKLab fixes
+// that by interpolating in a perceptually-uniform space, so a mid-transition
+// stays vivid. Math is Björn Ottosson's OKLab (https://bottosson.github.io/
+// posts/oklab/); Cartesian a/b (not polar OKLCH) so there's no hue-angle
+// wraparound to special-case.
+// ---------------------------------------------------------------------------
+
+function srgbToLinear(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+function linearToSrgb(c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; }
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+function rgbToHex([r, g, b]) {
+  const c = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+function linearSrgbToOklab(r, g, b) {
+  const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+  const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+  const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+  const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+  return [
+    0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+  ];
+}
+function oklabToLinearSrgb(L, a, b) {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+  return [
+    +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+  ];
+}
+
+function hexToOklab(hex) {
+  return linearSrgbToOklab(...hexToRgb(hex).map(srgbToLinear));
+}
+function oklabToHex(lab) {
+  return rgbToHex(oklabToLinearSrgb(...lab).map(linearToSrgb));
+}
+
+function lerpColorOklab(hexA, hexB, t) {
+  const a = hexToOklab(hexA), b = hexToOklab(hexB);
+  return oklabToHex([0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * t));
+}
+
+// ---------------------------------------------------------------------------
+// "Code" layer: an escape hatch into arbitrary ecmanim code. The function
+// body receives (ecmanim, t) -- the full ecmanim namespace, and this layer's
+// own elapsed time (seconds since its inTime) -- and must return a Mobject
+// or an array of them. It's recompiled and re-run EVERY render (same as
+// every other layer type already gets rebuilt from scratch each frame), so
+// "animation" here means "vary your output based on t", the same
+// declarative sample-at-time-t model the rest of the compositor already
+// uses (KeyframeTrack.valueAt(t)) -- not imperative addUpdater() state.
+// ---------------------------------------------------------------------------
+const CODE_LAYER_EXAMPLE =
+`// Runs every frame with (ecmanim, t) in scope -- t is seconds since this
+// layer appeared. Return a Mobject or an array of Mobjects.
+const { Star, Circle } = ecmanim;
+const star = new Star(6, { outerRadius: 1.2, color: "#f6ad55" });
+star.rotate(t * 0.6);
+const core = new Circle({ radius: 0.25, color: "#ffffff", fillColor: "#ffffff", fillOpacity: 1, strokeWidth: 0 });
+return [star, core];`;
+
+// ---------------------------------------------------------------------------
+// "Scene" layer: embed a genuine ecmanim Scene's construct() -- real
+// sequential scene.play()/scene.wait() scripting, not just a t-parameterized
+// snapshot -- as a layer, via ecmanim's sampleSceneAt() (src/scene/
+// orchestrate.ts). sampleSceneAt reruns the WHOLE construct() from scratch
+// up to a target time and returns the driven Scene, since there's no way to
+// "resume" a sequential script mid-way -- see requestSceneSample() below for
+// how the live preview manages that (async, cached, always chasing the
+// latest requested time without racing stale results).
+// ---------------------------------------------------------------------------
+const SCENE_LAYER_EXAMPLE =
+`// A real ecmanim construct() body -- (ecmanim, scene, props) in scope.
+// scene.play()/scene.wait() describe animation over actual time, exactly
+// like a top-level Scene, sampled at whichever moment the playhead is at.
+const { Square } = ecmanim;
+const square = new Square({ sideLength: 1.5, color: "#83c167", fillColor: "#83c167", fillOpacity: 1, strokeWidth: 0 });
+scene.add(square);
+await scene.play(square.animate.rotate(Math.PI / 2), { runTime: 1 });
+await scene.wait(0.3);
+await scene.play(square.animate.scale(1.4), { runTime: 0.7 });`;
+
+const TYPE_DEFAULTS = {
+  circle: { radius: 1, color: "#58c4dd" },
+  square: { sideLength: 1.5, color: "#f9a825" },
+  dot: { radius: 0.12, color: "#ffffff" },
+  text: { text: "Text", fontSize: 0.6, color: "#ffffff" },
+  line: { length: 3, angle: 0, color: "#83c167" },
+  arrow: { length: 3, angle: 0, color: "#83c167" },
+  star: { points: 5, outerRadius: 1, color: "#f6ad55" },
+  ellipse: { width: 2.4, height: 1.4, color: "#e07dd6" },
+  rectangle: { width: 2.4, height: 1.4, color: "#e0785c" },
+  polygon: { sides: 6, radius: 1, color: "#7dc4e0" },
+  mathtex: { tex: "e^{i\\pi} + 1 = 0", fontSize: 1, color: "#ffffff" },
+  // k is a plain animatable number, injected into the expression's scope
+  // alongside x -- write "k*Math.sin(x)" and keyframe k for a parameterized
+  // tween, instead of only ever jumping discretely between two expressions.
+  graph: { expr: "0.35*x*x - 1.5", k: 1, color: "#58c4dd" },
+  code: { code: CODE_LAYER_EXAMPLE },
+  scene: { code: SCENE_LAYER_EXAMPLE },
+};
+const TYPE_FIELDS = {
+  circle: [{ key: "radius", label: "Radius", type: "number", step: 0.1, min: 0.05 }],
+  square: [{ key: "sideLength", label: "Side", type: "number", step: 0.1, min: 0.05 }],
+  dot: [{ key: "radius", label: "Radius", type: "number", step: 0.02, min: 0.02 }],
+  text: [
+    { key: "text", label: "Text", type: "text" },
+    { key: "fontSize", label: "Font size", type: "number", step: 0.05, min: 0.1 },
+  ],
+  line: [
+    { key: "length", label: "Length", type: "number", step: 0.1, min: 0.05 },
+    { key: "angle", label: "Angle", type: "number", step: 5 },
+  ],
+  arrow: [
+    { key: "length", label: "Length", type: "number", step: 0.1, min: 0.05 },
+    { key: "angle", label: "Angle", type: "number", step: 5 },
+  ],
+  star: [
+    { key: "points", label: "Points", type: "number", step: 1, min: 3 },
+    { key: "outerRadius", label: "Radius", type: "number", step: 0.1, min: 0.05 },
+  ],
+  ellipse: [
+    { key: "width", label: "Width", type: "number", step: 0.1, min: 0.05 },
+    { key: "height", label: "Height", type: "number", step: 0.1, min: 0.05 },
+  ],
+  rectangle: [
+    { key: "width", label: "Width", type: "number", step: 0.1, min: 0.05 },
+    { key: "height", label: "Height", type: "number", step: 0.1, min: 0.05 },
+  ],
+  polygon: [
+    { key: "sides", label: "Sides", type: "number", step: 1, min: 3 },
+    { key: "radius", label: "Radius", type: "number", step: 0.1, min: 0.05 },
+  ],
+  mathtex: [
+    { key: "tex", label: "TeX", type: "text" },
+    { key: "fontSize", label: "Font size", type: "number", step: 0.05, min: 0.1 },
+  ],
+  graph: [
+    { key: "expr", label: "f(x) =", type: "text" },
+    { key: "k", label: "k", type: "number", step: 0.1 },
+  ],
+};
+const COMMON_FIELDS = [
+  { key: "x", label: "X", type: "number", step: 0.1 },
+  { key: "y", label: "Y", type: "number", step: 0.1 },
+  { key: "rotation", label: "Rotation", type: "number", step: 5 },
+  { key: "scale", label: "Scale", type: "number", step: 0.05, min: 0.01 },
+  { key: "opacity", label: "Opacity", type: "range", min: 0, max: 1, step: 0.01 },
+  { key: "color", label: "Color", type: "color" },
+];
+// MathTex's tex string and Code's source both need multi-line text areas,
+// not a single-line COMMON_FIELDS/TYPE_FIELDS input row -- rendered by their
+// own dedicated inspector sections instead (see refreshInspector()).
+
+let nextId = 1;
+const objects = [];
+let selectedId = null;
+let playhead = 0;
+let playing = false;
+let rafHandle = null;
+let lastFrameTime = 0;
+let onionSkinEnabled = false;
+
+// "Scene settings" -- duration/fps/frame size/background. Not per-object;
+// these describe the whole project, mirroring a video editor's composition/
+// sequence settings dialog.
+const projectSettings = {
+  durationOverride: null, // null = auto (fit whatever content needs)
+  fps: 30,
+  width: 960,
+  height: 540,
+  background: "#0d1117",
+};
+
+function addObject(type) {
+  beginChange();
+  const id = nextId++;
+  const count = objects.filter((o) => o.type === type).length + 1;
+  // Sound isn't a Mobject -- no x/y/opacity/color, just a file + gain.
+  const props = type === "sound"
+    ? { fileUrl: null, fileName: null, gain: 1 }
+    : { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, ...TYPE_DEFAULTS[type] };
+  objects.push({
+    id,
+    type,
+    name: `${type[0].toUpperCase()}${type.slice(1)} ${count}`,
+    props,
+    tracks: {},
+    inTime: 0,       // when this object starts existing in the scene (a sound's timeOffset)
+    outTime: null,   // null = stays until the end of the project (derived from file length for sound, once decoded)
+    collapsed: false, // timeline-panel group expand/collapse state
+  });
+  selectedId = id;
+  refreshAll();
+}
+
+// Whether `obj` should exist in the scene at time `t` -- outTime null means
+// "no exit point", i.e. stays for the rest of the project.
+function isVisibleAt(obj, t) {
+  return t >= obj.inTime && t <= (obj.outTime ?? Infinity);
+}
+
+function deleteObject(id) {
+  beginChange();
+  const i = objects.findIndex((o) => o.id === id);
+  if (i >= 0) objects.splice(i, 1);
+  if (selectedId === id) selectedId = null;
+  refreshAll();
+}
+
+// Deep-clones one object's data (props/tracks/timing), preserving its id and
+// name -- the shared building block for both duplicateObject() (which then
+// overrides id/name for the copy) and the undo/redo snapshot system below
+// (which needs independent copies so a later drag on the LIVE object can't
+// retroactively mutate an already-recorded snapshot's arrays/tracks).
+function cloneObjectDeep(obj) {
+  const clone = {
+    id: obj.id,
+    type: obj.type,
+    name: obj.name,
+    props: { ...obj.props },
+    tracks: Object.fromEntries(Object.entries(obj.tracks).map(([key, track]) => {
+      const cloned = new KeyframeTrack(track.keyframes.map((k) => ({ ...k })), trackOptsForKind(track._kind));
+      cloned._kind = track._kind;
+      return [key, cloned];
+    })),
+    inTime: obj.inTime,
+    outTime: obj.outTime,
+    collapsed: obj.collapsed,
+  };
+  if (obj.type === "sound" && obj._audioEl) {
+    // Audio decode is expensive but read-only -- safe to share; the <audio>
+    // element itself must be its own instance (play/pause state isn't shareable).
+    clone._audioData = obj._audioData;
+    clone._audioEl = new Audio(obj.props.fileUrl);
+    clone._audioEl.volume = clone.props.gain ?? 1;
+  }
+  // Compiled-code/scene/expr caches (obj._compiledSource, obj._sceneCompiledSource,
+  // obj._exprSource, ...) are deliberately NOT copied -- they're all keyed by
+  // "does this match obj.props.X", so the clone just recompiles fresh on its
+  // first render(), which is correct and cheap (no stale-cache risk).
+  return clone;
+}
+
+function duplicateObject(obj) {
+  if (!obj) return;
+  beginChange();
+  const id = nextId++;
+  const clone = cloneObjectDeep(obj);
+  clone.id = id;
+  clone.name = `${obj.name} copy`;
+  objects.splice(objects.indexOf(obj) + 1, 0, clone);
+  selectedId = id;
+  refreshAll();
+}
+
+// ---------------------------------------------------------------------------
+// Undo/redo: burst-debounced snapshots. Every mutating operation calls
+// beginChange() at its START (before touching state) -- the FIRST call in a
+// burst of related edits (e.g. every pointermove tick of one drag gesture)
+// captures a "before" snapshot; the debounce timer keeps resetting as the
+// burst continues, and only commits that single snapshot to the undo stack
+// once things go quiet for a moment, so one whole gesture is one undo step,
+// not one step per pixel/tick.
+// ---------------------------------------------------------------------------
+
+const undoStack = [];
+let redoStack = [];
+let burstBaseline = null;
+let burstTimer = null;
+const UNDO_LIMIT = 100;
+const BURST_DEBOUNCE_MS = 600;
+
+function snapshotState() {
+  return {
+    objects: objects.map(cloneObjectDeep),
+    selectedId,
+    nextId,
+    projectSettings: { ...projectSettings },
+    rangeStart,
+    rangeEnd,
+    loopEnabled,
+  };
+}
+
+function restoreSnapshot(snap) {
+  objects.length = 0;
+  objects.push(...snap.objects.map(cloneObjectDeep)); // re-clone so the stack's own copy stays untouched by future live edits
+  selectedId = snap.selectedId;
+  nextId = snap.nextId;
+  Object.assign(projectSettings, snap.projectSettings);
+  rangeStart = snap.rangeStart;
+  rangeEnd = snap.rangeEnd;
+  loopEnabled = snap.loopEnabled;
+  document.getElementById("loop-btn").classList.toggle("active", loopEnabled);
+  applyFrameSettings(); // in case projectSettings.width/height/background changed
+  refreshAll();
+}
+
+function beginChange() {
+  if (burstBaseline === null) burstBaseline = snapshotState();
+  redoStack = [];
+  refreshUndoRedoButtons();
+  clearTimeout(burstTimer);
+  burstTimer = setTimeout(commitBurst, BURST_DEBOUNCE_MS);
+}
+
+function commitBurst() {
+  clearTimeout(burstTimer);
+  if (burstBaseline === null) return;
+  undoStack.push(burstBaseline);
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  burstBaseline = null;
+  refreshUndoRedoButtons();
+}
+
+function undo() {
+  commitBurst(); // flush any in-progress burst as its own step first
+  if (!undoStack.length) return;
+  const current = snapshotState();
+  const prev = undoStack.pop();
+  redoStack.push(current);
+  restoreSnapshot(prev);
+  refreshUndoRedoButtons();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  const current = snapshotState();
+  const next = redoStack.pop();
+  undoStack.push(current);
+  restoreSnapshot(next);
+  refreshUndoRedoButtons();
+}
+
+function refreshUndoRedoButtons() {
+  document.getElementById("undo-btn").disabled = undoStack.length === 0 && burstBaseline === null;
+  document.getElementById("redo-btn").disabled = redoStack.length === 0;
+}
+
+function selected() {
+  return objects.find((o) => o.id === selectedId) ?? null;
+}
+
+function fieldsFor(obj) {
+  // Code/Scene layers pick their own colors internally -- a global "Color"
+  // field wouldn't map to anything.
+  const common = (obj.type === "code" || obj.type === "scene")
+    ? COMMON_FIELDS.filter((f) => f.key !== "color") : COMMON_FIELDS;
+  return [...common, ...(TYPE_FIELDS[obj.type] ?? [])];
+}
+
+function effectiveProps(obj) {
+  const result = { ...obj.props };
+  for (const [prop, track] of Object.entries(obj.tracks)) {
+    result[prop] = track.valueAt(playhead);
+  }
+  return result;
+}
+
+function projectDuration() {
+  if (projectSettings.durationOverride != null) return projectSettings.durationOverride;
+  let d = 6;
+  for (const obj of objects) {
+    for (const track of Object.values(obj.tracks)) d = Math.max(d, track.duration);
+    if (obj.outTime != null) d = Math.max(d, obj.outTime);
+    d = Math.max(d, obj.inTime);
+  }
+  return d;
+}
+
+// Set a property's value, respecting the "animating vs static" rule: if the
+// property has a track, edits upsert a keyframe at the current playhead
+// time (like a real motion-graphics tool); otherwise they just edit the
+// static base value.
+function setPropValue(obj, key, value) {
+  beginChange();
+  const track = obj.tracks[key];
+  if (track) {
+    const eps = 0.02;
+    const existing = track.keyframes.find((k) => Math.abs(k.t - playhead) < eps);
+    if (existing) existing.value = value;
+    else track.addKeyframe({ t: playhead, value });
+  } else {
+    obj.props[key] = value;
+  }
+}
+
+function toggleAnimated(obj, key) {
+  beginChange();
+  if (obj.tracks[key]) {
+    delete obj.tracks[key];
+  } else {
+    const current = effectiveProps(obj)[key];
+    // Hex color strings aren't numbers/arrays, so KeyframeTrack's default
+    // lerp would throw -- interpolate in OKLab instead of raw sRGB so a
+    // color transition stays vivid instead of dipping through grey. Any
+    // OTHER string-valued field (Text's `text`, MathTex's `tex`, Graph's
+    // `expr`) hits the exact same throw with a single differing keyframe;
+    // there's no sane way to "lerp" a string, so step-swap at the next
+    // keyframe's time instead of crashing.
+    const kind = key === "color" ? "color"
+      : (obj.type === "graph" && key === "expr") ? "expr-blend"
+      : typeof current === "string" ? "step" : "number";
+    const opts = trackOptsForKind(kind);
+    const track = new KeyframeTrack([{ t: playhead, value: current }], opts);
+    track._kind = kind; // tagged so duplicateObject() can reconstruct the same interpolate option
+    obj.tracks[key] = track;
+  }
+}
+
+// KeyframeTrack doesn't expose whatever custom `interpolate` it was built
+// with, so the "kind" is tracked alongside it (see toggleAnimated() above) --
+// this is the single place that maps a kind back to real options, shared by
+// both track creation and duplicateObject()'s cloning.
+function trackOptsForKind(kind) {
+  if (kind === "color") return { interpolate: lerpColorOklab };
+  if (kind === "step") return { interpolate: (a, b, t) => (t < 1 ? a : b) };
+  if (kind === "expr-blend") return { interpolate: exprBlendInterpolate };
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+const canvas = document.getElementById("stage");
+const ctx = canvas.getContext("2d");
+// World height is pinned at 8 units regardless of aspect ratio/resolution --
+// frameWidth is derived from it, so changing the frame preset in Scene
+// Settings never changes how "big" existing content looks, only how much
+// horizontal (or vertical, for a portrait preset) extent is visible.
+const camera = new Camera({
+  pixelWidth: projectSettings.width, pixelHeight: projectSettings.height,
+  frameWidth: 8 * (projectSettings.width / projectSettings.height), frameHeight: 8,
+  background: projectSettings.background,
+});
+const renderer = new CanvasRenderer(ctx, camera);
+
+// Applies projectSettings.{width,height,background} to the canvas/camera --
+// called on Scene Settings changes (and once at startup, implicitly, via the
+// values above already matching the canvas's own width/height attributes).
+function applyFrameSettings() {
+  canvas.width = projectSettings.width;
+  canvas.height = projectSettings.height;
+  camera.pixelWidth = projectSettings.width;
+  camera.pixelHeight = projectSettings.height;
+  camera.frameWidth = 8 * (projectSettings.width / projectSettings.height);
+  camera.frameHeight = 8;
+  camera.background = projectSettings.background;
+  render();
+}
+
+let liveMobjects = []; // this frame's built mobjects, index-aligned with `visualObjects`, for picking
+let visibleObjects = []; // ALL objects (incl. sound) whose [inTime, outTime] window contains the playhead
+let visualObjects = []; // the subset of visibleObjects that are actual Mobjects (sound excluded)
+
+// Cached compile-on-change for the two "runs arbitrary JS" layer types --
+// avoids re-parsing a Function from source on every single frame (this is
+// still called every render(), just skips re-compiling when the source
+// text hasn't changed since the last call).
+// `exprValue` is effectiveProps(obj).expr -- the TIME-RESOLVED value (a plain
+// string normally, or an exprBlendInterpolate() descriptor mid-transition
+// when "expr" is keyframed on a graph -- see toggleAnimated()). Compiles to a
+// (x, k) => number function either way; k is a plain animatable number
+// exposed in the expression's own scope (write "k*Math.sin(x)" and keyframe
+// k) for parameterized tweening, and blend mode cross-fades the two
+// expressions' own Y-values (not a symbolic morph) for a real, if
+// approximate, "tween between equations".
+function compileExpr(obj, exprValue) {
+  const isBlend = exprValue && typeof exprValue === "object" && exprValue.__exprBlend;
+  const key = isBlend ? `blend:${exprValue.exprA}|${exprValue.exprB}|${exprValue.alpha.toFixed(4)}` : exprValue;
+  if (obj._exprKey !== key) {
+    try {
+      if (isBlend) {
+        const fnA = new Function("x", "k", `return (${exprValue.exprA});`);
+        const fnB = new Function("x", "k", `return (${exprValue.exprB});`);
+        const alpha = exprValue.alpha;
+        obj._exprFn = (x, k) => fnA(x, k) * (1 - alpha) + fnB(x, k) * alpha;
+      } else {
+        obj._exprFn = new Function("x", "k", `return (${exprValue});`);
+      }
+      obj._exprError = null;
+    } catch (e) {
+      obj._exprFn = null;
+      obj._exprError = e.message;
+    }
+    obj._exprKey = key;
+  }
+  return obj._exprFn;
+}
+
+// Custom interpolate for a keyframed graph "expr" track: instead of Text/
+// MathTex's discrete step-swap (the only sane option for those), blend the
+// two expressions' sampled Y-values -- a real (if numeric, not symbolic)
+// tween "between equations". Returns the plain string unchanged when both
+// keyframes match (avoids blend overhead when nothing's actually changing).
+function exprBlendInterpolate(exprA, exprB, alpha) {
+  if (exprA === exprB) return exprA;
+  return { __exprBlend: true, exprA, exprB, alpha };
+}
+function compileCodeFn(obj) {
+  if (obj._compiledSource !== obj.props.code) {
+    try {
+      obj._compiledFn = new Function("ecmanim", "t", obj.props.code);
+      obj._compileError = null;
+    } catch (e) {
+      obj._compiledFn = null;
+      obj._compileError = e.message;
+    }
+    obj._compiledSource = obj.props.code;
+  }
+  return obj._compiledFn;
+}
+
+// AsyncFunction isn't a global -- derive its constructor the standard way,
+// since a Scene layer's body uses `await scene.play(...)`/`await scene.wait(...)`.
+const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+
+// Compiles a Scene layer's source into a bare construct function matching
+// sampleSceneAt()'s (scene, props) => {...} convention, closing over the
+// full ecmanim namespace so the user's code can reference `ecmanim.X` (the
+// same convention Code layers use) without it being a formal parameter of
+// the function sampleSceneAt actually calls.
+function compileSceneFn(obj) {
+  if (obj._sceneCompiledSource !== obj.props.code) {
+    try {
+      const raw = new AsyncFunction("ecmanim", "scene", "props", obj.props.code);
+      obj._sceneCompiledFn = (scene, props) => raw(EcmanimNS, scene, props);
+      obj._sceneCompileError = null;
+    } catch (e) {
+      obj._sceneCompiledFn = null;
+      obj._sceneCompileError = e.message;
+    }
+    obj._sceneCompiledSource = obj.props.code;
+  }
+  return obj._sceneCompiledFn;
+}
+
+// sampleSceneAt() is async and re-runs the WHOLE sub-scene from scratch on
+// every call -- calling it directly from buildMobject() (synchronous, called
+// every render()) would fire a new overlapping request on nearly every
+// scrub/playback frame, with no guarantee they resolve in time order. This
+// keeps at most one request in flight per object, always chasing the latest
+// requested (code, time) pair once the in-flight one finishes, and discards
+// any resolution superseded by a newer request (via a generation counter) --
+// while showing the last successfully sampled result in the meantime rather
+// than blanking out on every scrub tick.
+function requestSceneSample(obj, t) {
+  const roundedT = Math.round(t * 20) / 20; // 50ms buckets -- avoids re-sampling on every sub-frame scrub jitter
+  const key = `${obj.props.code}|${roundedT}`;
+  if (obj._sceneRequestKey === key) return; // already have (or are fetching) exactly this
+  obj._sceneNextRequest = { code: obj.props.code, t: roundedT };
+  if (obj._sceneRequestPending) return; // runSceneSample's `finally` will pick this up
+  fireNextSceneRequest(obj);
+}
+
+function fireNextSceneRequest(obj) {
+  const { code, t } = obj._sceneNextRequest;
+  const key = `${code}|${t}`;
+  obj._sceneRequestKey = key;
+  obj._sceneRequestPending = true;
+  const gen = (obj._sceneGen = (obj._sceneGen ?? 0) + 1);
+  runSceneSample(obj, t, key, gen);
+}
+
+async function runSceneSample(obj, t, key, gen) {
+  try {
+    const fn = compileSceneFn(obj);
+    if (!fn) throw new Error(obj._sceneCompileError || "scene code did not compile");
+    const scene = await sampleSceneAt(fn, t, { fps: projectSettings.fps });
+    if (obj._sceneGen !== gen) return; // superseded -- discard this stale resolution
+    obj._sceneMobjects = scene.mobjects;
+    obj._sceneRuntimeError = null;
+  } catch (e) {
+    if (obj._sceneGen !== gen) return;
+    obj._sceneRuntimeError = e.message;
+  } finally {
+    if (obj._sceneGen === gen) {
+      obj._sceneRequestPending = false;
+      render();
+      if (selected()?.id === obj.id) refreshInspector(); // surface a fresh error/status line, if any
+      if (obj._sceneNextRequest && `${obj._sceneNextRequest.code}|${obj._sceneNextRequest.t}` !== key) {
+        fireNextSceneRequest(obj);
+      }
+    }
+  }
+}
+
+function buildMobject(obj) {
+  const p = effectiveProps(obj);
+  let mob;
+  if (obj.type === "circle") {
+    mob = new Circle({ radius: Math.max(0.01, p.radius), color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0 });
+  } else if (obj.type === "square") {
+    mob = new Square({ sideLength: Math.max(0.01, p.sideLength), color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0 });
+  } else if (obj.type === "dot") {
+    mob = new Dot({ radius: Math.max(0.01, p.radius), color: p.color });
+  } else if (obj.type === "text") {
+    mob = new Text(String(p.text ?? ""), { fontSize: Math.max(0.05, p.fontSize), color: p.color });
+  } else if (obj.type === "line" || obj.type === "arrow") {
+    const half = Math.max(0.01, p.length) / 2;
+    const rad = (p.angle * Math.PI) / 180;
+    const dx = Math.cos(rad) * half, dy = Math.sin(rad) * half;
+    const Ctor = obj.type === "line" ? Line : Arrow;
+    mob = new Ctor([-dx, -dy, 0], [dx, dy, 0], { color: p.color });
+  } else if (obj.type === "star") {
+    mob = new Star(Math.max(3, Math.round(p.points)), {
+      outerRadius: Math.max(0.05, p.outerRadius), color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0,
+    });
+  } else if (obj.type === "ellipse") {
+    mob = new Ellipse({
+      width: Math.max(0.05, p.width), height: Math.max(0.05, p.height),
+      color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0,
+    });
+  } else if (obj.type === "rectangle") {
+    mob = new Rectangle({
+      width: Math.max(0.05, p.width), height: Math.max(0.05, p.height),
+      color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0,
+    });
+  } else if (obj.type === "polygon") {
+    mob = new RegularPolygon(Math.max(3, Math.round(p.sides)), {
+      radius: Math.max(0.05, p.radius), color: p.color, fillColor: p.color, fillOpacity: 1, strokeWidth: 0,
+    });
+  } else if (obj.type === "mathtex") {
+    try {
+      mob = new MathTex(p.tex, { color: p.color, fontSize: Math.max(0.1, p.fontSize) });
+    } catch (e) {
+      mob = new Text(`⚠ ${e.message}`, { color: "#ff5555", fontSize: 0.3 });
+    }
+  } else if (obj.type === "graph") {
+    const fn = compileExpr(obj, p.expr); // p.expr is the TIME-RESOLVED value (plain string, or a blend descriptor)
+    if (!fn) {
+      mob = new Text(`⚠ ${obj._exprError}`, { color: "#ff5555", fontSize: 0.3 });
+    } else {
+      try {
+        const axes = new Axes({ xRange: [-4, 4, 1], yRange: [-4, 4, 1] });
+        const curve = axes.plot((x) => fn(x, p.k), { color: p.color });
+        mob = new VGroup(axes, curve);
+      } catch (e) {
+        mob = new Text(`⚠ ${e.message}`, { color: "#ff5555", fontSize: 0.3 });
+      }
+    }
+  } else if (obj.type === "code") {
+    const fn = compileCodeFn(obj);
+    const t = Math.max(0, playhead - obj.inTime);
+    try {
+      if (!fn) throw new Error(obj._compileError || "code did not compile");
+      const result = fn(EcmanimNS, t);
+      mob = Array.isArray(result) ? new VGroup(...result) : (result ?? new VGroup());
+      obj._runtimeError = null;
+    } catch (e) {
+      obj._runtimeError = e.message;
+      mob = new Text(`⚠ ${obj.name}`, { color: "#ff5555", fontSize: 0.3 });
+    }
+  } else if (obj.type === "scene") {
+    const t = Math.max(0, playhead - obj.inTime);
+    requestSceneSample(obj, t); // async, cached -- see above; never blocks this frame
+    if (obj._sceneMobjects) mob = new VGroup(...obj._sceneMobjects);
+    else if (obj._sceneRuntimeError) mob = new Text(`⚠ ${obj._sceneRuntimeError}`, { color: "#ff5555", fontSize: 0.3 });
+    else mob = new Text("sampling…", { color: "#7b8290", fontSize: 0.3 });
+  }
+  // Rotate/scale about the shape's own (pre-move) center, THEN move to its
+  // final position -- so rotation/scale never orbits it away from (x, y).
+  if (p.rotation) mob.rotate((p.rotation * Math.PI) / 180);
+  if (p.scale != null && p.scale !== 1) mob.scale(Math.max(0.001, p.scale));
+  mob.moveTo([p.x, p.y, 0]);
+  // setOpacity(), not a raw `mob.opacity =` assignment: the renderer only
+  // reads each LEAF mobject's own opacity during its draw walk (a
+  // container's opacity never cascades to its children on its own -- see
+  // CanvasRenderer.renderMobjects()'s flat collect() pass). For a leaf
+  // (Circle, Square, ...) this is equivalent to direct assignment; for a
+  // container (Graph's Axes+curve VGroup, a Code layer's VGroup) it's the
+  // only way the opacity slider actually does anything.
+  mob.setOpacity(p.opacity);
+  return mob;
+}
+
+// Builds the visible mobjects at an ARBITRARY time (not just the current
+// playhead) for onion skinning -- buildMobject()/effectiveProps() read the
+// global `playhead` directly (not a parameter), so this briefly swaps it,
+// builds, and restores it. Safe because JS is single-threaded and nothing
+// else runs between the swap and the restore. Note: for "code"/"scene"
+// layers this also fires their own async request machinery for the
+// prev/next times, not just the current one -- acceptable for an opt-in
+// scrubbing aid, but it does mean onion skin triples their sampling load.
+function buildMobjectsAtTime(t) {
+  const saved = playhead;
+  playhead = t;
+  try {
+    return objects.filter((o) => isVisibleAt(o, t) && o.type !== "sound").map(buildMobject);
+  } finally {
+    playhead = saved;
+  }
+}
+
+function render() {
+  visibleObjects = objects.filter((o) => isVisibleAt(o, playhead));
+  visualObjects = visibleObjects.filter((o) => o.type !== "sound");
+  liveMobjects = visualObjects.map(buildMobject);
+
+  // Onion skinning: ghost the previous/next frame at reduced opacity, behind
+  // the current one. Only while paused/scrubbing -- during Play it would be
+  // both visually noisy (constant flicker) and triple the per-frame cost.
+  let toDraw = liveMobjects;
+  if (onionSkinEnabled && !playing) {
+    const dt = 1 / projectSettings.fps;
+    const duration = projectDuration();
+    const prev = playhead - dt >= 0 ? buildMobjectsAtTime(playhead - dt) : [];
+    const next = playhead + dt <= duration ? buildMobjectsAtTime(playhead + dt) : [];
+    for (const m of prev) m.setOpacity((m.opacity ?? 1) * 0.35);
+    for (const m of next) m.setOpacity((m.opacity ?? 1) * 0.35);
+    toDraw = [...prev, ...next, ...liveMobjects]; // ghosts painted first, current on top
+  }
+  renderer.renderScene(toDraw);
+  syncSounds();
+  document.getElementById("time-readout").textContent = playhead.toFixed(2);
+  document.getElementById("duration-readout").textContent = projectDuration().toFixed(2);
+}
+
+// ---------------------------------------------------------------------------
+// Canvas pointer interaction: click selects, drag moves the selected/hit
+// object (converted from screen delta to world delta via the camera's own
+// toPixel scale factors), wheel zooms. Deliberately NOT reusing
+// attachInteractiveCamera's drag handler -- that always pans the camera;
+// here a drag over an object should move the OBJECT, and only pan when the
+// drag starts on empty space.
+// ---------------------------------------------------------------------------
+
+let dragMode = null; // "object" | "pan" | null
+let dragObj = null;
+let lastX = 0, lastY = 0;
+
+function pointerPos(ev) {
+  const r = canvas.getBoundingClientRect();
+  return [ev.clientX - r.left, ev.clientY - r.top];
+}
+
+canvas.addEventListener("pointerdown", (ev) => {
+  const [px, py] = pointerPos(ev);
+  const hit = pickAt(px, py, liveMobjects, camera);
+  [lastX, lastY] = [px, py];
+  if (hit) {
+    selectedId = visualObjects[hit.index].id;
+    dragMode = "object";
+    dragObj = visualObjects[hit.index];
+    beginChange();
+  } else {
+    dragMode = "pan";
+    dragObj = null;
+  }
+  canvas.setPointerCapture(ev.pointerId);
+  refreshInspector();
+  refreshLayerList();
+  render();
+});
+
+canvas.addEventListener("pointermove", (ev) => {
+  if (!dragMode) return;
+  const [px, py] = pointerPos(ev);
+  const dx = px - lastX, dy = py - lastY;
+  lastX = px; lastY = py;
+  const z = camera.zoom ?? 1;
+  if (dragMode === "object" && dragObj) {
+    const worldDx = (dx / camera.pixelWidth) * camera.frameWidth * z;
+    const worldDy = -(dy / camera.pixelHeight) * camera.frameHeight * z;
+    const p = effectiveProps(dragObj);
+    setPropValue(dragObj, "x", p.x + worldDx);
+    setPropValue(dragObj, "y", p.y + worldDy);
+    refreshInspector();
+    refreshTimeline();
+  } else if (dragMode === "pan") {
+    const worldDx = (-dx / camera.pixelWidth) * camera.frameWidth * z;
+    const worldDy = (dy / camera.pixelHeight) * camera.frameHeight * z;
+    camera.frameCenter = [camera.frameCenter[0] + worldDx, camera.frameCenter[1] + worldDy, 0];
+  }
+  render();
+});
+
+function endDrag() { dragMode = null; dragObj = null; }
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointerleave", endDrag);
+
+canvas.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const factor = Math.exp(-ev.deltaY * 0.001);
+  camera.zoom = Math.max(0.1, Math.min(10, (camera.zoom ?? 1) * factor));
+  render();
+}, { passive: false });
+
+// ---------------------------------------------------------------------------
+// Layers panel
+// ---------------------------------------------------------------------------
+
+const layerList = document.getElementById("layer-list");
+function refreshLayerList() {
+  layerList.innerHTML = "";
+  for (const obj of objects) {
+    const row = document.createElement("div");
+    row.className = "layer-row" + (obj.id === selectedId ? " selected" : "") + (isVisibleAt(obj, playhead) ? "" : " not-visible");
+    row.draggable = true;
+    const swatch = document.createElement("div");
+    swatch.className = "swatch";
+    if (obj.type === "sound" || obj.type === "code" || obj.type === "scene") {
+      swatch.classList.add("swatch-icon");
+      swatch.textContent = obj.type === "sound" ? "♪" : obj.type === "code" ? "{ }" : "▶";
+    } else {
+      swatch.style.background = effectiveProps(obj).color;
+    }
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = obj.name;
+    name.title = "Double-click to rename";
+    name.addEventListener("dblclick", (ev) => {
+      ev.stopPropagation();
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "rename-input";
+      input.value = obj.name;
+      let cancelled = false;
+      const commit = () => {
+        if (!cancelled && input.value.trim() && input.value.trim() !== obj.name) {
+          beginChange();
+          obj.name = input.value.trim();
+        }
+        refreshLayerList();
+        refreshInspector();
+        refreshTimeline();
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") input.blur();
+        else if (e.key === "Escape") { cancelled = true; input.blur(); }
+      });
+      name.replaceWith(input);
+      input.focus();
+      input.select();
+    });
+    const dup = document.createElement("button");
+    dup.className = "del";
+    dup.textContent = "⧉";
+    dup.title = "Duplicate";
+    dup.addEventListener("click", (ev) => { ev.stopPropagation(); duplicateObject(obj); });
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "✕";
+    del.title = "Delete";
+    del.addEventListener("click", (ev) => { ev.stopPropagation(); deleteObject(obj.id); });
+    row.append(swatch, name, dup, del);
+    row.addEventListener("click", () => { selectedId = obj.id; refreshAll(); });
+
+    // Drag-to-reorder: array order IS z-order (paint order) and export order.
+    row.addEventListener("dragstart", (ev) => {
+      ev.dataTransfer.setData("text/plain", String(obj.id));
+      ev.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", (ev) => {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+    });
+    row.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      const draggedId = Number(ev.dataTransfer.getData("text/plain"));
+      if (draggedId === obj.id) return;
+      const fromIdx = objects.findIndex((o) => o.id === draggedId);
+      const toIdx = objects.findIndex((o) => o.id === obj.id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      beginChange();
+      const [moved] = objects.splice(fromIdx, 1);
+      objects.splice(objects.indexOf(obj), 0, moved);
+      refreshAll();
+    });
+    layerList.appendChild(row);
+  }
+}
+
+document.getElementById("add-type").addEventListener("change", (ev) => {
+  const type = ev.target.value;
+  ev.target.value = "";
+  if (type) addObject(type);
+});
+
+// ---------------------------------------------------------------------------
+// Inspector panel
+// ---------------------------------------------------------------------------
+
+const inspectorFields = document.getElementById("inspector-fields");
+const inspectorName = document.getElementById("inspector-name");
+const inspectorType = document.getElementById("inspector-type");
+const emptyHint = document.getElementById("empty-hint");
+
+function refreshInspector() {
+  const obj = selected();
+  if (!obj) {
+    inspectorName.textContent = "No selection";
+    inspectorType.textContent = "";
+    inspectorFields.style.display = "none";
+    emptyHint.style.display = "block";
+    return;
+  }
+  inspectorFields.style.display = "flex";
+  emptyHint.style.display = "none";
+  inspectorName.textContent = obj.name;
+  inspectorType.textContent = obj.type;
+  inspectorFields.innerHTML = "";
+
+  if (obj.type === "sound") {
+    renderSoundFields(obj);
+    renderTimingSection(obj);
+    return;
+  }
+
+  const p = effectiveProps(obj);
+  for (const field of fieldsFor(obj)) {
+    const row = document.createElement("div");
+    row.className = "field-row";
+    const label = document.createElement("label");
+    label.textContent = field.label;
+    let input;
+    if (field.type === "color") {
+      input = document.createElement("input");
+      input.type = "color";
+      input.value = p[field.key];
+    } else if (field.type === "range") {
+      input = document.createElement("input");
+      input.type = "range";
+      input.min = field.min; input.max = field.max; input.step = field.step;
+      input.value = p[field.key];
+    } else if (field.type === "text") {
+      input = document.createElement("input");
+      input.type = "text";
+      input.value = p[field.key];
+    } else {
+      input = document.createElement("input");
+      input.type = "number";
+      input.step = field.step ?? 0.1;
+      if (field.min != null) input.min = field.min;
+      input.value = Math.round(p[field.key] * 1000) / 1000;
+    }
+    input.dataset.key = field.key;
+    input.addEventListener("input", () => {
+      const v = field.type === "number" || field.type === "range" ? parseFloat(input.value) : input.value;
+      setPropValue(obj, field.key, v);
+      if (field.key === "color") refreshLayerList();
+      refreshTimeline();
+      render();
+    });
+    row.appendChild(label);
+    row.appendChild(input);
+    const toggle = document.createElement("button");
+    toggle.className = "anim-toggle" + (obj.tracks[field.key] ? " active" : "");
+    toggle.textContent = "◆";
+    toggle.title = obj.tracks[field.key] ? "Stop animating this property" : "Animate this property";
+    toggle.addEventListener("click", () => {
+      toggleAnimated(obj, field.key);
+      refreshInspector();
+      refreshTimeline();
+      render();
+    });
+    row.appendChild(toggle);
+    inspectorFields.appendChild(row);
+  }
+
+  if (obj.type === "code") renderCodeSection(obj);
+  if (obj.type === "scene") renderSceneSection(obj);
+
+  renderTimingSection(obj);
+}
+
+// A "Code" layer's source doesn't fit a single-line field-row -- a full
+// textarea, recompiled (debounced) on edit, with the last compile/runtime
+// error shown inline so a typo doesn't just silently blank the layer.
+function renderCodeSection(obj) {
+  const header = document.createElement("div");
+  header.className = "section-label";
+  header.textContent = "Code";
+  inspectorFields.appendChild(header);
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "code-editor";
+  textarea.spellcheck = false;
+  textarea.value = obj.props.code;
+  const errorLine = document.createElement("div");
+  errorLine.className = "code-error";
+
+  let debounceTimer = null;
+  textarea.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      obj.props.code = textarea.value;
+      render(); // recompiles (compileCodeFn caches on source change) and sets obj._compileError/_runtimeError
+      errorLine.textContent = obj._compileError || obj._runtimeError || "";
+    }, 250);
+  });
+  errorLine.textContent = obj._compileError || obj._runtimeError || "";
+
+  inspectorFields.appendChild(textarea);
+  inspectorFields.appendChild(errorLine);
+}
+
+// A Scene layer's error state arrives asynchronously (sampleSceneAt() is a
+// promise) -- runSceneSample()'s `finally` block calls refreshInspector()
+// when this object is the selected one, which rebuilds this section fresh
+// with whatever obj._sceneCompileError/_sceneRuntimeError landed.
+function renderSceneSection(obj) {
+  const header = document.createElement("div");
+  header.className = "section-label";
+  header.textContent = "Scene";
+  inspectorFields.appendChild(header);
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "code-editor";
+  textarea.spellcheck = false;
+  textarea.value = obj.props.code;
+  const errorLine = document.createElement("div");
+  errorLine.className = "code-error";
+
+  let debounceTimer = null;
+  textarea.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      obj.props.code = textarea.value;
+      obj._sceneMobjects = null; // stale content from the old code -- force a fresh sample
+      render();
+      errorLine.textContent = obj._sceneCompileError || obj._sceneRuntimeError || "";
+    }, 250);
+  });
+  errorLine.textContent = obj._sceneCompileError || obj._sceneRuntimeError || "";
+
+  inspectorFields.appendChild(textarea);
+  inspectorFields.appendChild(errorLine);
+}
+
+// --- Timing: when this object exists in the scene (not a property track --
+// there's nothing to "animate" about a layer's own appearance window). ---
+function renderTimingSection(obj) {
+  const timingHeader = document.createElement("div");
+  timingHeader.className = "section-label";
+  timingHeader.textContent = "Timing";
+  inspectorFields.appendChild(timingHeader);
+
+  const inRow = document.createElement("div");
+  inRow.className = "field-row";
+  const inLabel = document.createElement("label");
+  inLabel.textContent = "Appears";
+  const inInput = document.createElement("input");
+  inInput.type = "number";
+  inInput.step = 0.1;
+  inInput.min = 0;
+  inInput.value = Math.round(obj.inTime * 1000) / 1000;
+  inInput.addEventListener("input", () => {
+    beginChange();
+    obj.inTime = Math.max(0, Math.min(parseFloat(inInput.value) || 0, obj.outTime ?? Infinity));
+    refreshTimeline();
+    render();
+  });
+  inRow.append(inLabel, inInput);
+  inspectorFields.appendChild(inRow);
+
+  const outRow = document.createElement("div");
+  outRow.className = "field-row";
+  const outLabel = document.createElement("label");
+  outLabel.textContent = "Disappears";
+  const stayCheckbox = document.createElement("input");
+  stayCheckbox.type = "checkbox";
+  stayCheckbox.checked = obj.outTime == null;
+  stayCheckbox.title = "Stays to the end of the project";
+  const outInput = document.createElement("input");
+  outInput.type = "number";
+  outInput.step = 0.1;
+  outInput.min = obj.inTime;
+  outInput.value = Math.round((obj.outTime ?? projectDuration()) * 1000) / 1000;
+  outInput.disabled = obj.outTime == null;
+  outInput.addEventListener("input", () => {
+    beginChange();
+    obj.outTime = Math.max(obj.inTime, parseFloat(outInput.value) || obj.inTime);
+    refreshTimeline();
+    render();
+  });
+  stayCheckbox.addEventListener("change", () => {
+    beginChange();
+    obj.outTime = stayCheckbox.checked ? null : projectDuration();
+    outInput.disabled = stayCheckbox.checked;
+    outInput.value = Math.round((obj.outTime ?? projectDuration()) * 1000) / 1000;
+    refreshTimeline();
+    render();
+  });
+  outRow.append(outLabel, stayCheckbox, outInput);
+  inspectorFields.appendChild(outRow);
+}
+
+// ---------------------------------------------------------------------------
+// Sound layer: not a Mobject (no x/y/color/opacity), just a file + gain.
+// Reuses the SAME appearance-window machinery as every visual layer:
+// inTime IS the sound's timeOffset, and outTime is set to inTime+duration
+// once the file is decoded, so isVisibleAt()/the timeline group bar/dragging
+// all work unmodified. Editing "Disappears" earlier than the natural file
+// end genuinely trims playback (syncSounds() pauses once !isVisibleAt()).
+// ---------------------------------------------------------------------------
+
+function renderSoundFields(obj) {
+  const header = document.createElement("div");
+  header.className = "section-label";
+  header.textContent = "Sound";
+  inspectorFields.appendChild(header);
+
+  const fileBtn = document.createElement("button");
+  fileBtn.className = "sound-file-btn";
+  fileBtn.textContent = obj.props.fileName ? "Change file…" : "Choose audio file…";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "audio/*";
+  fileInput.style.display = "none";
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (file) loadSoundFile(obj, file);
+  });
+  fileBtn.addEventListener("click", () => fileInput.click());
+  inspectorFields.append(fileBtn, fileInput);
+
+  const nameLine = document.createElement("div");
+  nameLine.className = "sound-file-name";
+  nameLine.textContent = obj.props.fileName
+    ? `${obj.props.fileName}${obj._audioData ? ` (${obj._audioData.durationInSeconds.toFixed(1)}s)` : " (decoding…)"}`
+    : "No file selected";
+  inspectorFields.appendChild(nameLine);
+
+  const gainRow = document.createElement("div");
+  gainRow.className = "field-row";
+  const gainLabel = document.createElement("label");
+  gainLabel.textContent = "Gain";
+  const gainInput = document.createElement("input");
+  gainInput.type = "range";
+  gainInput.min = 0; gainInput.max = 1; gainInput.step = 0.05;
+  gainInput.value = obj.props.gain;
+  gainInput.addEventListener("input", () => {
+    obj.props.gain = parseFloat(gainInput.value);
+    if (obj._audioEl) obj._audioEl.volume = obj.props.gain;
+  });
+  gainRow.append(gainLabel, gainInput);
+  inspectorFields.appendChild(gainRow);
+}
+
+async function loadSoundFile(obj, file) {
+  if (obj._audioEl) { obj._audioEl.pause(); obj._audioEl.src = ""; }
+  const url = URL.createObjectURL(file);
+  obj.props.fileUrl = url;
+  obj.props.fileName = file.name;
+  obj._audioData = null; // stale waveform cleared while decoding
+  const audio = new Audio(url);
+  audio.volume = obj.props.gain ?? 1;
+  obj._audioEl = audio;
+  refreshInspector();
+  refreshLayerList();
+  refreshTimeline();
+  try {
+    obj._audioData = await getAudioData(url);
+    obj.outTime = obj.inTime + obj._audioData.durationInSeconds;
+  } catch (e) {
+    obj._audioData = null;
+  }
+  refreshInspector();
+  refreshTimeline();
+  render();
+}
+
+// Keeps every sound's <audio> element in sync with the playhead: plays
+// while `playing` is true and the playhead is within its window, correcting
+// drift beyond 150ms rather than resetting currentTime every tick (which
+// would click/stutter); otherwise pauses and parks at the scrubbed position
+// so a later Play resumes without an audible jump.
+function syncSounds() {
+  for (const obj of objects) {
+    if (obj.type !== "sound" || !obj._audioEl) continue;
+    const t = playhead - obj.inTime;
+    const active = isVisibleAt(obj, playhead);
+    if (playing && active) {
+      if (obj._audioEl.paused) {
+        obj._audioEl.currentTime = Math.max(0, t);
+        obj._audioEl.play().catch(() => {});
+      } else if (Math.abs(obj._audioEl.currentTime - t) > 0.15) {
+        obj._audioEl.currentTime = Math.max(0, t);
+      }
+    } else {
+      if (!obj._audioEl.paused) obj._audioEl.pause();
+      if (!playing) obj._audioEl.currentTime = Math.max(0, t);
+    }
+  }
+}
+
+// Lightweight per-frame refresh during playback: updates existing input
+// values in place (no DOM rebuild) so the numeric readouts track the
+// animation instead of showing a stale value while the shape visibly moves.
+// Skips whichever input has focus, so it never fights a user mid-edit.
+function refreshInspectorValues() {
+  const obj = selected();
+  if (!obj) return;
+  const p = effectiveProps(obj);
+  inspectorFields.querySelectorAll("input[data-key]").forEach((input) => {
+    if (document.activeElement === input) return;
+    const key = input.dataset.key;
+    input.value = input.type === "text" || input.type === "color" ? p[key] : Math.round(p[key] * 1000) / 1000;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Timeline panel: a ruler (click/drag to scrub) above a scrollable stack of
+// per-object groups. Each group is a header row (collapse caret + name + a
+// draggable bar showing the object's [inTime, outTime] appearance window)
+// followed -- when expanded -- by one row per animated property, showing
+// that property's keyframe dots.
+//
+// This does NOT reuse the shared renderKeyframeTimeline/
+// attachKeyframeTimelineEditor primitives (src/studio/timeline.ts): both
+// assume "one array index == one row", which breaks the moment header rows
+// are interspersed with track rows. Row placement here is driven by our own
+// `buildTimelineRows()` list instead; only the time<->pixel axis math
+// (timeToPixel/pixelToTime) is shared.
+// ---------------------------------------------------------------------------
+
+const ROW_H = 22;
+
+const ruler = document.getElementById("ruler");
+const rulerCtx = ruler.getContext("2d");
+const kfCanvas = document.getElementById("keyframe-canvas");
+const kfCtx = kfCanvas.getContext("2d");
+const trackLabels = document.getElementById("track-labels");
+
+function timeAxis() {
+  return { duration: projectDuration(), pixelWidth: kfCanvas.width };
+}
+
+// Flatten every object into its header row plus (if expanded) one row per
+// animated property. This flat list is the single source of truth for both
+// the label column and the canvas -- row index i always means y = i*ROW_H.
+function buildTimelineRows() {
+  const rows = [];
+  for (const obj of objects) {
+    rows.push({ type: "header", obj });
+    if (!obj.collapsed) {
+      for (const [key, track] of Object.entries(obj.tracks)) {
+        rows.push({ type: "track", obj, key, track });
+      }
+    }
+  }
+  return rows;
+}
+
+function refreshTimeline() {
+  const axis = timeAxis();
+  const rows = buildTimelineRows();
+
+  // --- Ruler ---
+  rulerCtx.clearRect(0, 0, ruler.width, ruler.height);
+  rulerCtx.fillStyle = "#20242c";
+  rulerCtx.fillRect(0, 0, ruler.width, ruler.height);
+  rulerCtx.strokeStyle = "#3a4150";
+  rulerCtx.beginPath();
+  for (let t = 0; t <= axis.duration + 1e-6; t += 0.5) {
+    const x = timeToPixel(t, axis);
+    rulerCtx.moveTo(x, t % 1 === 0 ? 4 : 10);
+    rulerCtx.lineTo(x, 20);
+  }
+  rulerCtx.stroke();
+  if (rangeStart != null || rangeEnd != null) {
+    const rsPx = timeToPixel(rangeStart ?? 0, axis);
+    const rePx = timeToPixel(rangeEnd ?? axis.duration, axis);
+    rulerCtx.fillStyle = "rgba(88, 196, 221, 0.22)";
+    rulerCtx.fillRect(rsPx, 0, Math.max(1, rePx - rsPx), ruler.height);
+    rulerCtx.fillStyle = "#58c4dd";
+    rulerCtx.fillRect(rsPx - 2, 0, 4, ruler.height);
+    rulerCtx.fillRect(rePx - 2, 0, 4, ruler.height);
+  }
+  const playheadX = timeToPixel(playhead, axis);
+  rulerCtx.strokeStyle = "#e05c5c";
+  rulerCtx.beginPath();
+  rulerCtx.moveTo(playheadX, 0);
+  rulerCtx.lineTo(playheadX, ruler.height);
+  rulerCtx.stroke();
+
+  // --- Label column ---
+  trackLabels.innerHTML = "";
+  trackLabels.style.height = `${rows.length * ROW_H}px`;
+  for (const row of rows) {
+    const el = document.createElement("div");
+    if (row.type === "header") {
+      el.className = "tl-row tl-header" + (row.obj.id === selectedId ? " selected" : "");
+      const caret = document.createElement("span");
+      caret.className = "caret";
+      caret.textContent = row.obj.collapsed ? "▸" : "▾";
+      caret.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        row.obj.collapsed = !row.obj.collapsed;
+        refreshTimeline();
+      });
+      const name = document.createElement("span");
+      name.textContent = row.obj.name;
+      el.append(caret, name);
+      el.addEventListener("click", () => { selectedId = row.obj.id; refreshInspector(); refreshLayerList(); refreshTimeline(); });
+    } else {
+      el.className = "tl-row tl-track";
+      el.textContent = row.key;
+    }
+    trackLabels.appendChild(el);
+  }
+
+  // --- Canvas ---
+  kfCanvas.height = Math.max(1, rows.length * ROW_H);
+  kfCanvas.style.height = `${kfCanvas.height}px`; // pin CSS size to the resolution explicitly (see #keyframe-canvas comment)
+  kfCtx.clearRect(0, 0, kfCanvas.width, kfCanvas.height);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const y = i * ROW_H;
+    kfCtx.fillStyle = row.type === "header" ? "#20242c" : (i % 2 === 0 ? "#1e222a" : "#20242c");
+    kfCtx.fillRect(0, y, kfCanvas.width, ROW_H);
+    if (row.type === "header") {
+      const x0 = timeToPixel(row.obj.inTime, axis);
+      const x1 = timeToPixel(row.obj.outTime ?? axis.duration, axis);
+      kfCtx.fillStyle = row.obj.id === selectedId ? "#3f7f94" : "#2f5a68";
+      kfCtx.fillRect(x0, y + 4, Math.max(2, x1 - x0), ROW_H - 8);
+      if (row.obj.type === "sound" && row.obj._audioData) {
+        const bars = computeWaveformBars(
+          getWaveformPortion({ audioData: row.obj._audioData, startTimeInSeconds: 0, durationInSeconds: row.obj._audioData.durationInSeconds, numberOfSamples: Math.max(1, Math.round(x1 - x0)) }),
+          { pixelWidth: x1 - x0, maxHeight: ROW_H - 10 },
+        );
+        kfCtx.fillStyle = "#bfe6f0";
+        const barWidth = bars.length ? (x1 - x0) / bars.length : 0;
+        for (const bar of bars) {
+          kfCtx.fillRect(x0 + bar.x, y + ROW_H / 2 - bar.height / 2, Math.max(1, barWidth - 1), Math.max(1, bar.height));
+        }
+      }
+      // A little dog-ear on the open (no outTime) end -- distinguishes "stays
+      // to the end" from "explicitly ends right at the project boundary".
+      if (row.obj.outTime == null) {
+        kfCtx.fillStyle = "#58c4dd";
+        kfCtx.fillRect(x1 - 3, y + 4, 3, ROW_H - 8);
+      }
+    } else {
+      kfCtx.fillStyle = "#f6ad55";
+      for (const kf of row.track.keyframes) {
+        const x = timeToPixel(kf.t, axis);
+        kfCtx.beginPath();
+        kfCtx.arc(x, y + ROW_H / 2, 5, 0, Math.PI * 2);
+        kfCtx.fill();
+      }
+    }
+  }
+  // Playhead line across the full row stack.
+  kfCtx.strokeStyle = "#e05c5c";
+  kfCtx.beginPath();
+  kfCtx.moveTo(playheadX, 0);
+  kfCtx.lineTo(playheadX, kfCanvas.height);
+  kfCtx.stroke();
+}
+
+function scrubToTime(t) {
+  playhead = Math.max(0, Math.min(projectDuration(), t));
+  refreshTimeline();
+  refreshInspector();
+  render();
+}
+function scrubTo(px) {
+  scrubToTime(pixelToTime(px, timeAxis()));
+}
+
+let scrubbing = false;
+function rulerPointerPos(ev) {
+  const r = ruler.getBoundingClientRect();
+  return ev.clientX - r.left;
+}
+
+// ---------------------------------------------------------------------------
+// Play range / loop: an in/out marker pair, separate from the project's full
+// duration, that Play loops between when Loop is on. null means "the whole
+// project" for that end -- so a freshly-added range collapses back to the
+// full timeline instead of needing to be deleted.
+// ---------------------------------------------------------------------------
+
+let rangeStart = null; // null = 0
+let rangeEnd = null;   // null = projectDuration()
+let loopEnabled = false;
+let rangeDrag = null; // "start" | "end" | null
+const RANGE_HANDLE_HIT = 6;
+
+ruler.addEventListener("pointerdown", (ev) => {
+  const px = rulerPointerPos(ev);
+  const axis = timeAxis();
+  const startPx = timeToPixel(rangeStart ?? 0, axis);
+  const endPx = timeToPixel(rangeEnd ?? projectDuration(), axis);
+  if (Math.abs(px - startPx) <= RANGE_HANDLE_HIT) {
+    rangeDrag = "start";
+    beginChange();
+  } else if (Math.abs(px - endPx) <= RANGE_HANDLE_HIT) {
+    rangeDrag = "end";
+    beginChange();
+  } else {
+    scrubbing = true;
+    scrubTo(px);
+  }
+});
+ruler.addEventListener("dblclick", () => {
+  beginChange();
+  rangeStart = null;
+  rangeEnd = null;
+  refreshTimeline();
+});
+// pointermove/up are bound on `window`, not `ruler` -- the ruler is a thin
+// 20px strip, so a scrub drag overshoots its bounds almost immediately;
+// binding only to the ruler would silently stop tracking mid-drag.
+window.addEventListener("pointermove", (ev) => {
+  if (rangeDrag) {
+    const t = snapTime(Math.max(0, Math.min(projectDuration(), pixelToTime(rulerPointerPos(ev), timeAxis()))), ev);
+    if (rangeDrag === "start") rangeStart = Math.min(t, rangeEnd ?? projectDuration()) || null;
+    else rangeEnd = Math.max(t, rangeStart ?? 0);
+    if (rangeStart === 0) rangeStart = null; // dragged back to the start -- treat as "unset" again
+    if (rangeEnd === projectDuration()) rangeEnd = null; // dragged back to the end -- likewise
+    refreshTimeline();
+  } else if (scrubbing) {
+    scrubTo(rulerPointerPos(ev));
+  }
+});
+window.addEventListener("pointerup", () => { scrubbing = false; rangeDrag = null; });
+
+document.getElementById("loop-btn").addEventListener("click", (ev) => {
+  loopEnabled = !loopEnabled;
+  ev.currentTarget.classList.toggle("active", loopEnabled);
+});
+
+// --- Keyframe-canvas interaction: drag a keyframe dot to retime it, or drag
+// a header's appearance bar (body = move both ends, edges = resize one). ---
+
+let kfDrag = null; // { kind: "keyframe", track, keyframe } | { kind: "move"|"resize-in"|"resize-out", obj }
+const EDGE_HIT = 6;
+const DOT_HIT = 8;
+
+// Snaps a time to the nearest frame boundary (the "nice increment" tied to
+// how the timeline is fundamentally divided, and to Scene Settings' fps) --
+// hold Shift to disable for fine, unsnapped control, the common convention
+// most timeline tools share.
+function snapTime(t, ev) {
+  if (ev?.shiftKey) return t;
+  const frame = 1 / projectSettings.fps;
+  return Math.round(t / frame) * frame;
+}
+
+function kfPointerPos(ev) {
+  const r = kfCanvas.getBoundingClientRect();
+  return [ev.clientX - r.left, ev.clientY - r.top];
+}
+
+kfCanvas.addEventListener("pointerdown", (ev) => {
+  const [px, py] = kfPointerPos(ev);
+  const rowIndex = Math.floor(py / ROW_H);
+  const rows = buildTimelineRows();
+  const row = rows[rowIndex];
+  if (!row) return;
+  const axis = timeAxis();
+
+  if (row.type === "track") {
+    let best = null, bestDist = DOT_HIT;
+    for (const kf of row.track.keyframes) {
+      const dist = Math.abs(timeToPixel(kf.t, axis) - px);
+      if (dist <= bestDist) { best = kf; bestDist = dist; }
+    }
+    if (best) kfDrag = { kind: "keyframe", track: row.track, keyframe: best };
+  } else {
+    const x0 = timeToPixel(row.obj.inTime, axis);
+    const x1 = timeToPixel(row.obj.outTime ?? axis.duration, axis);
+    if (Math.abs(px - x0) <= EDGE_HIT) kfDrag = { kind: "resize-in", obj: row.obj };
+    else if (Math.abs(px - x1) <= EDGE_HIT) kfDrag = { kind: "resize-out", obj: row.obj };
+    else if (px >= x0 && px <= x1) kfDrag = { kind: "move", obj: row.obj, grabT: pixelToTime(px, axis) - row.obj.inTime };
+  }
+  if (kfDrag) {
+    beginChange();
+    kfCanvas.setPointerCapture(ev.pointerId);
+  }
+});
+
+kfCanvas.addEventListener("pointermove", (ev) => {
+  if (!kfDrag) return;
+  const [px] = kfPointerPos(ev);
+  const axis = timeAxis();
+  const t = snapTime(Math.max(0, pixelToTime(px, axis)), ev);
+  if (kfDrag.kind === "keyframe") {
+    kfDrag.keyframe.t = t;
+    kfDrag.track.keyframes.sort((a, b) => a.t - b.t);
+  } else if (kfDrag.kind === "resize-in") {
+    kfDrag.obj.inTime = Math.min(t, kfDrag.obj.outTime ?? Infinity);
+  } else if (kfDrag.kind === "resize-out") {
+    kfDrag.obj.outTime = Math.max(t, kfDrag.obj.inTime);
+  } else if (kfDrag.kind === "move") {
+    const duration = (kfDrag.obj.outTime ?? axis.duration) - kfDrag.obj.inTime;
+    const newIn = Math.max(0, t - kfDrag.grabT);
+    kfDrag.obj.inTime = newIn;
+    if (kfDrag.obj.outTime != null) kfDrag.obj.outTime = newIn + duration;
+  }
+  refreshTimeline();
+  render();
+});
+
+function endKfDrag() {
+  if (!kfDrag) return;
+  kfDrag = null;
+  refreshInspector();
+  refreshLayerList();
+}
+kfCanvas.addEventListener("pointerup", endKfDrag);
+
+// ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
+
+const playBtn = document.getElementById("play-btn");
+function setPlaying(next) {
+  playing = next;
+  playBtn.innerHTML = playing ? "&#10074;&#10074; Pause" : "&#9654; Play";
+  if (playing) {
+    const rangeEndT = rangeEnd ?? projectDuration();
+    // Restart from the range (or project) start if pressed at (or past) the
+    // end -- otherwise the very first tick() immediately re-triggers the end
+    // condition and playback looks like it does nothing.
+    if (playhead >= rangeEndT) playhead = rangeStart ?? 0;
+    lastFrameTime = performance.now();
+    rafHandle = requestAnimationFrame(tick);
+  } else if (rafHandle != null) {
+    cancelAnimationFrame(rafHandle);
+    rafHandle = null;
+  }
+}
+function tick(now) {
+  const dt = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+  playhead += dt;
+  const rangeStartT = rangeStart ?? 0;
+  const rangeEndT = rangeEnd ?? projectDuration();
+  if (playhead >= rangeEndT) {
+    if (loopEnabled) {
+      const overshoot = playhead - rangeEndT;
+      playhead = rangeStartT + (overshoot % Math.max(1e-6, rangeEndT - rangeStartT));
+    } else {
+      playhead = rangeEndT;
+      setPlaying(false);
+    }
+  }
+  refreshTimeline();
+  refreshInspectorValues();
+  refreshLayerList();
+  render();
+  if (playing) rafHandle = requestAnimationFrame(tick);
+}
+playBtn.addEventListener("click", () => setPlaying(!playing));
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts -- the standard transport/editing set most timeline
+// tools share (Space/Home/End/arrow-step/Delete/Duplicate). Ignored while
+// typing in any input/textarea/select so it never fights normal text entry.
+// ---------------------------------------------------------------------------
+
+window.addEventListener("keydown", (ev) => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+  if (ev.key === " ") {
+    ev.preventDefault();
+    setPlaying(!playing);
+  } else if (ev.key === "Home") {
+    ev.preventDefault();
+    scrubToTime(0);
+  } else if (ev.key === "End") {
+    ev.preventDefault();
+    scrubToTime(projectDuration());
+  } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+    ev.preventDefault();
+    if (playing) setPlaying(false);
+    const step = 1 / projectSettings.fps;
+    scrubToTime(playhead + (ev.key === "ArrowRight" ? step : -step));
+  } else if ((ev.key === "Delete" || ev.key === "Backspace") && selectedId != null) {
+    ev.preventDefault();
+    deleteObject(selectedId);
+  } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "d" && selectedId != null) {
+    ev.preventDefault();
+    duplicateObject(selected());
+  } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z" && ev.shiftKey) {
+    ev.preventDefault();
+    redo();
+  } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "z") {
+    ev.preventDefault();
+    undo();
+  } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "y") {
+    ev.preventDefault();
+    redo();
+  }
+});
+
+document.getElementById("undo-btn").addEventListener("click", undo);
+document.getElementById("redo-btn").addEventListener("click", redo);
+refreshUndoRedoButtons();
+
+// ---------------------------------------------------------------------------
+// Export: generate a runnable ecmanim Scene construct() body from the
+// current document, so the compositor is a real entry point into ecmanim
+// code, not a closed toy.
+// ---------------------------------------------------------------------------
+
+function jsLiteral(v) {
+  return JSON.stringify(v);
+}
+
+// Standalone OKLab helper emitted into exported code (once) so a color
+// track's exported playback matches the compositor's own preview instead of
+// silently falling back to plain RGB lerp.
+const LERP_OKLAB_SOURCE = `function lerpColorOklab(hexA, hexB, t) {
+  const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const linearToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+  const hexToRgb = (hex) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  };
+  const rgbToHex = ([r, g, b]) => {
+    const c = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0");
+    return \`#\${c(r)}\${c(g)}\${c(b)}\`;
+  };
+  const toOklab = (r, g, b) => {
+    const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+    const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+    const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+    const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+    return [
+      0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+      1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+      0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    ];
+  };
+  const fromOklab = (L, a, b) => {
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    return [
+      +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ];
+  };
+  const a = toOklab(...hexToRgb(hexA).map(srgbToLinear));
+  const b = toOklab(...hexToRgb(hexB).map(srgbToLinear));
+  const lab = [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * t);
+  return rgbToHex(fromOklab(...lab).map(linearToSrgb));
+}`;
+
+// A keyframed string field (Text's `text`, MathTex's `tex`, Graph's `expr`)
+// can't be lerped -- there's no sane midpoint between two strings -- so it
+// holds the earlier value until the next keyframe's time, then jumps.
+const STEP_SWAP_SOURCE = `function stepSwap(a, b, t) {
+  return t < 1 ? a : b;
+}`;
+
+// A keyframed graph "expr" cross-fades the two expressions' own sampled
+// Y-values (a real, if numeric-not-symbolic, tween "between equations")
+// instead of discretely jumping -- exprBlendInterpolate matches the live
+// preview's KeyframeTrack option; compileGraphExpr turns whatever value that
+// produces (a plain string most of the time, a blend descriptor mid-
+// transition) into an (x, k) => number function either way.
+const GRAPH_EXPR_SOURCE = `function exprBlendInterpolate(exprA, exprB, alpha) {
+  if (exprA === exprB) return exprA;
+  return { __exprBlend: true, exprA, exprB, alpha };
+}
+function compileGraphExpr(exprValue) {
+  if (exprValue && typeof exprValue === "object" && exprValue.__exprBlend) {
+    const fnA = new Function("x", "k", "return (" + exprValue.exprA + ");");
+    const fnB = new Function("x", "k", "return (" + exprValue.exprB + ");");
+    const alpha = exprValue.alpha;
+    return (x, k) => fnA(x, k) * (1 - alpha) + fnB(x, k) * alpha;
+  }
+  return new Function("x", "k", "return (" + exprValue + ");");
+}`;
+
+function generateSceneCode() {
+  const ctor = {
+    circle: "Circle", square: "Square", dot: "Dot", text: "Text", line: "Line", arrow: "Arrow", star: "Star",
+    ellipse: "Ellipse", rectangle: "Rectangle", polygon: "RegularPolygon",
+  };
+  const visualObjs = objects.filter((o) => o.type !== "sound");
+  const soundObjs = objects.filter((o) => o.type === "sound");
+  const usedTypes = [...new Set(visualObjs.map((o) => ctor[o.type]).filter(Boolean))];
+  const usesTracks = visualObjs.some((o) => Object.keys(o.tracks).length > 0);
+  const usesColorTrack = visualObjs.some((o) => o.tracks.color);
+  const usesStepTrack = visualObjs.some((o) => Object.values(o.tracks).some((t) => t._kind === "step"));
+  const usesExprBlendTrack = visualObjs.some((o) => Object.values(o.tracks).some((t) => t._kind === "expr-blend"));
+  const usesMathTex = visualObjs.some((o) => o.type === "mathtex");
+  const usesGraph = visualObjs.some((o) => o.type === "graph");
+  const usesCode = visualObjs.some((o) => o.type === "code");
+  const usesScene = visualObjs.some((o) => o.type === "scene");
+  const usesVGroup = usesGraph || usesCode || usesScene;
+  const duration = projectDuration();
+  const lines = [];
+
+  const imports = [
+    "Scene", ...usedTypes,
+    ...(usesMathTex ? ["MathTex", "initMathTex"] : []),
+    ...(usesGraph ? ["Axes"] : []),
+    ...(usesVGroup ? ["VGroup"] : []),
+    ...(usesTracks ? ["bindTrack"] : []),
+    ...(usesScene ? ["sampleSceneAt"] : []),
+  ];
+  lines.push(`import { ${imports.join(", ")} } from "ecmanim";`);
+  // Code/Scene layers reference a bare `ecmanim` identifier (matching the
+  // live preview's (ecmanim, ...) signature) -- give them the same namespace
+  // here as a plain module-level binding, so their body needs no rewriting.
+  if (usesCode || usesScene) lines.push(`import * as ecmanim from "ecmanim";`);
+  if (usesColorTrack) { lines.push(""); lines.push(LERP_OKLAB_SOURCE); }
+  if (usesStepTrack) { lines.push(""); lines.push(STEP_SWAP_SOURCE); }
+  if (usesExprBlendTrack) { lines.push(""); lines.push(GRAPH_EXPR_SOURCE); }
+  lines.push("");
+  // fps/width/height/background are RENDER-time options (passed to render()/
+  // the CLI, or a Camera you construct yourself), not something a Scene
+  // subclass owns -- ecmanim has no single call that reads all four off the
+  // class itself, so they're surfaced here as a comment + a constructor
+  // default for fps specifically (the one of the four Scene.fps actually
+  // reads, e.g. for a "Scene"-layer's own frame-bake resolution above).
+  lines.push(`// Recommended render config (compositor's current Scene Settings):`);
+  lines.push(`//   render(ComposedScene, { fps: ${projectSettings.fps}, width: ${projectSettings.width}, height: ${projectSettings.height} })`);
+  lines.push(`//   -- background is a Camera property: new Camera({ background: ${jsLiteral(projectSettings.background)}, ... })`);
+  lines.push(`export default class ComposedScene extends Scene {`);
+  lines.push(`  constructor(config = {}) {`);
+  lines.push(`    super({ fps: ${projectSettings.fps}, ...config });`);
+  lines.push(`  }`);
+  lines.push(`  async construct() {`);
+  if (usesMathTex) lines.push(`    await initMathTex();`);
+  if (usesScene) lines.push(`    const fps = this.fps;`);
+  lines.push("");
+
+  // Construct every object + its property tracks up front; VISIBILITY
+  // (this.add()/this.remove()) is scheduled separately below, since two
+  // objects can have independent, possibly-overlapping appearance windows
+  // that a single flat list of statements can't express inline.
+  for (const obj of visualObjs) {
+    const varName = "obj" + obj.id;
+    const p = obj.props;
+    const rotRad = (p.rotation * Math.PI) / 180;
+    const hasRotate = !!p.rotation;
+    const hasScale = p.scale != null && p.scale !== 1;
+    let graphAnimated = false;
+
+    if (obj.type === "text") {
+      lines.push(`    const ${varName} = new Text(${jsLiteral(p.text)}, { fontSize: ${p.fontSize}, color: ${jsLiteral(p.color)} });`);
+    } else if (obj.type === "circle" || obj.type === "square") {
+      const sizeKey = obj.type === "circle" ? "radius" : "sideLength";
+      const sizeArg = obj.type === "circle" ? `radius: ${p[sizeKey]}` : `sideLength: ${p[sizeKey]}`;
+      lines.push(`    const ${varName} = new ${ctor[obj.type]}({ ${sizeArg}, color: ${jsLiteral(p.color)}, fillColor: ${jsLiteral(p.color)}, fillOpacity: 1, strokeWidth: 0 });`);
+    } else if (obj.type === "dot") {
+      lines.push(`    const ${varName} = new Dot({ radius: ${p.radius}, color: ${jsLiteral(p.color)} });`);
+    } else if (obj.type === "ellipse" || obj.type === "rectangle") {
+      lines.push(`    const ${varName} = new ${ctor[obj.type]}({ width: ${p.width}, height: ${p.height}, color: ${jsLiteral(p.color)}, fillColor: ${jsLiteral(p.color)}, fillOpacity: 1, strokeWidth: 0 });`);
+    } else if (obj.type === "polygon") {
+      lines.push(`    const ${varName} = new RegularPolygon(${Math.round(p.sides)}, { radius: ${p.radius}, color: ${jsLiteral(p.color)}, fillColor: ${jsLiteral(p.color)}, fillOpacity: 1, strokeWidth: 0 });`);
+    } else if (obj.type === "line" || obj.type === "arrow") {
+      const half = p.length / 2;
+      const rad = (p.angle * Math.PI) / 180;
+      const dx = Math.cos(rad) * half, dy = Math.sin(rad) * half;
+      lines.push(`    const ${varName} = new ${ctor[obj.type]}([${(-dx).toFixed(4)}, ${(-dy).toFixed(4)}, 0], [${dx.toFixed(4)}, ${dy.toFixed(4)}, 0], { color: ${jsLiteral(p.color)} });`);
+    } else if (obj.type === "star") {
+      lines.push(`    const ${varName} = new Star(${Math.round(p.points)}, { outerRadius: ${p.outerRadius}, color: ${jsLiteral(p.color)}, fillColor: ${jsLiteral(p.color)}, fillOpacity: 1, strokeWidth: 0 });`);
+    } else if (obj.type === "mathtex") {
+      lines.push(`    const ${varName} = new MathTex(${jsLiteral(p.tex)}, { color: ${jsLiteral(p.color)}, fontSize: ${p.fontSize} });`);
+    } else if (obj.type === "graph") {
+      graphAnimated = !!(obj.tracks.k || obj.tracks.expr);
+      if (!graphAnimated) {
+        lines.push(`    const ${varName}Axes = new Axes({ xRange: [-4, 4, 1], yRange: [-4, 4, 1] });`);
+        lines.push(`    const ${varName}Curve = ${varName}Axes.plot((x) => (${p.expr}), { color: ${jsLiteral(p.color)} });`);
+        lines.push(`    const ${varName} = new VGroup(${varName}Axes, ${varName}Curve);`);
+      } else {
+        // k and/or expr can change over time -- Axes.plot() bakes points once
+        // at call time, so a FRESH Axes+curve pair must be built from scratch
+        // every rebuild (reusing one persistent Axes across rebuilds would
+        // mean rotate()/scale() below -- both RELATIVE transforms -- get
+        // reapplied to the SAME already-transformed points every single call,
+        // compounding without bound). k/expr's live values are plain local
+        // variables, ticked directly inside ${varName}'s own updater (which
+        // already receives dt) rather than via bindTrack: bindTrack requires
+        // its target to sit in the scene's update-traversal tree, which a
+        // throwaway-rebuilt Axes never does.
+        lines.push(`    let ${varName}K = ${p.k};`);
+        lines.push(`    let ${varName}Expr = ${jsLiteral(p.expr)};`);
+        lines.push(`    const ${varName} = new VGroup();`);
+        lines.push(`    function ${varName}Rebuild() {`);
+        lines.push(`      const fn = compileGraphExpr(${varName}Expr);`);
+        lines.push(`      const axes = new Axes({ xRange: [-4, 4, 1], yRange: [-4, 4, 1] });`);
+        lines.push(`      const curve = axes.plot((x) => fn(x, ${varName}K), { color: ${jsLiteral(p.color)} });`);
+        // Apply rotate/scale to a throwaway wrapper around this FRESH
+        // geometry, then adopt its (now-transformed) children into the
+        // persistent container; moveTo/setOpacity stay direct since those are
+        // absolute, not relative, so reapplying is idempotent.
+        lines.push(`      const wrap = new VGroup(axes, curve);`);
+        if (hasRotate) lines.push(`      wrap.rotate(${rotRad});`);
+        if (hasScale) lines.push(`      wrap.scale(${p.scale});`);
+        lines.push(`      ${varName}.submobjects = wrap.submobjects;`);
+        lines.push(`      ${varName}.moveTo([${p.x}, ${p.y}, 0]);`);
+        lines.push(`      ${varName}.setOpacity(${p.opacity});`);
+        lines.push(`    }`);
+        lines.push(`    ${varName}Rebuild();`);
+      }
+    } else if (obj.type === "scene") {
+      // Embeds a real ecmanim construct() script (scene.play()/scene.wait()
+      // timing) via sampleSceneAt(). Real per-frame rendering needs a
+      // SYNCHRONOUS updater, but sampleSceneAt() is async and re-runs the
+      // whole sub-script from scratch each call (there's no way to "resume"
+      // a sequential script mid-way) -- so all of that async work is done
+      // ONCE, up front here, pre-baking a discrete per-frame mobject
+      // sequence; the updater below just indexes into it, which IS
+      // synchronous. The loop's own stopping condition (`sampled.time < `
+      // the time it asked for) detects when the sub-script finished
+      // naturally, without a separate up-front "get the total duration" pass.
+      lines.push(`    async function ${varName}Construct(scene, props) {`);
+      for (const codeLine of obj.props.code.split("\n")) lines.push(`      ${codeLine}`);
+      lines.push(`    }`);
+      lines.push(`    const ${varName}Frames = [];`);
+      lines.push(`    for (let f = 0; ; f++) {`);
+      lines.push(`      const sampled = await sampleSceneAt(${varName}Construct, f / fps, { fps });`);
+      if (hasRotate || hasScale) {
+        // Rotate/scale is baked into each frame ONCE here (not per
+        // ApplyFrame call below) -- these frames are static snapshots, so
+        // there's no "every frame" compounding risk to avoid in the first place.
+        lines.push(`      const wrap = new VGroup(...sampled.mobjects);`);
+        if (hasRotate) lines.push(`      wrap.rotate(${rotRad});`);
+        if (hasScale) lines.push(`      wrap.scale(${p.scale});`);
+        lines.push(`      ${varName}Frames.push(wrap.submobjects);`);
+      } else {
+        lines.push(`      ${varName}Frames.push(sampled.mobjects);`);
+      }
+      lines.push(`      if (sampled.time < f / fps) break;`);
+      lines.push(`    }`);
+      lines.push(`    const ${varName} = new VGroup();`);
+      lines.push(`    let ${varName}Elapsed = 0;`);
+      lines.push(`    function ${varName}ApplyFrame(elapsed) {`);
+      lines.push(`      const idx = Math.max(0, Math.min(${varName}Frames.length - 1, Math.round(elapsed * fps)));`);
+      lines.push(`      ${varName}.submobjects = ${varName}Frames[idx];`);
+      lines.push(`      ${varName}.moveTo([${p.x}, ${p.y}, 0]);`);
+      lines.push(`      ${varName}.setOpacity(${p.opacity});`);
+      lines.push(`    }`);
+      lines.push(`    ${varName}ApplyFrame(0);`);
+      lines.push(`    ${varName}.addUpdater((m, dt) => { ${varName}Elapsed += dt; ${varName}ApplyFrame(${varName}Elapsed); });`);
+    }
+
+    if (obj.type === "code") {
+      // Re-invoked every frame via addUpdater() -- Mobject.update(dt) already
+      // recurses into submobjects (src/mobject/Mobject.ts), so a plain
+      // updater on this container is all real playback needs, exactly
+      // mirroring how the live preview rebuilds this layer from scratch
+      // every frame. moveTo/setOpacity are re-applied inside the rebuild
+      // (not just once) since a fresh build starts back at its own local
+      // coordinates each time; rotate/scale go on a throwaway wrapper
+      // around the fresh content for the same reason the graph branch above
+      // does (relative transforms would compound on a persistent container).
+      lines.push(`    function ${varName}Content(t) {`);
+      for (const codeLine of obj.props.code.split("\n")) lines.push(`      ${codeLine}`);
+      lines.push(`    }`);
+      lines.push(`    const ${varName} = new VGroup();`);
+      lines.push(`    let ${varName}Time = 0;`);
+      lines.push(`    function ${varName}Rebuild(t) {`);
+      lines.push(`      const result = ${varName}Content(t);`);
+      lines.push(`      const wrap = new VGroup(...(Array.isArray(result) ? result : [result]));`);
+      if (hasRotate) lines.push(`      wrap.rotate(${rotRad});`);
+      if (hasScale) lines.push(`      wrap.scale(${p.scale});`);
+      lines.push(`      ${varName}.submobjects = wrap.submobjects;`);
+      lines.push(`      ${varName}.moveTo([${p.x}, ${p.y}, 0]);`);
+      lines.push(`      ${varName}.setOpacity(${p.opacity});`);
+      lines.push(`    }`);
+      lines.push(`    ${varName}Rebuild(0);`);
+      lines.push(`    ${varName}.addUpdater((m, dt) => { ${varName}Time += dt; ${varName}Rebuild(${varName}Time); });`);
+    } else if (obj.type !== "scene" && !graphAnimated) {
+      // Scene layers and an animated graph already apply rotate/scale/
+      // moveTo/setOpacity inside their own ApplyFrame()/Rebuild() above --
+      // doing it again here would just be redundant, not incorrect, but let's not.
+      if (hasRotate) lines.push(`    ${varName}.rotate(${rotRad});`);
+      if (hasScale) lines.push(`    ${varName}.scale(${p.scale});`);
+      lines.push(`    ${varName}.moveTo([${p.x}, ${p.y}, 0]);`);
+      lines.push(`    ${varName}.setOpacity(${p.opacity});`);
+    }
+    const graphTrackVars = {}; // key ("k"/"expr") -> the `this.track(...)` const name, graph-animated only
+    for (const [key, track] of Object.entries(obj.tracks)) {
+      const kfs = track.keyframes.map((k) => `{ t: ${k.t.toFixed(3)}, value: ${jsLiteral(k.value)} }`).join(", ");
+      const trackOpts = track._kind === "color" ? ", { interpolate: lerpColorOklab }"
+        : track._kind === "step" ? ", { interpolate: stepSwap }"
+        : track._kind === "expr-blend" ? ", { interpolate: exprBlendInterpolate }"
+        : "";
+      if (obj.type === "graph" && (key === "k" || key === "expr")) {
+        // Not bindTrack -- there is no persistent, tree-resident mobject to
+        // bind onto (see the "graph" branch above); ticked manually inside
+        // ${varName}'s own updater instead, right below.
+        const trackVar = `${varName}${key === "k" ? "K" : "Expr"}Track`;
+        lines.push(`    const ${trackVar} = this.track([${kfs}]${trackOpts});`);
+        graphTrackVars[key] = trackVar;
+      } else {
+        lines.push(`    bindTrack(${varName}, ${jsLiteral(key)}, this.track([${kfs}]${trackOpts}));`);
+      }
+    }
+    if (graphAnimated) {
+      const tickAssignments = [];
+      if (graphTrackVars.k) tickAssignments.push(`${varName}K = ${graphTrackVars.k}.tick(dt);`);
+      if (graphTrackVars.expr) tickAssignments.push(`${varName}Expr = ${graphTrackVars.expr}.tick(dt);`);
+      lines.push(`    ${varName}.addUpdater((m, dt) => { ${tickAssignments.join(" ")} ${varName}Rebuild(); });`);
+    }
+    lines.push("");
+  }
+
+  for (const obj of soundObjs) {
+    const fileRef = obj.props.fileName ? jsLiteral(`./${obj.props.fileName}`) : `"./sound.mp3" /* no file chosen in the compositor */`;
+    lines.push(`    // NOTE: point this at your actual audio file -- the compositor only holds an in-browser blob reference, not a real path.`);
+    lines.push(`    this.addSound(${fileRef}, { timeOffset: ${obj.inTime.toFixed(2)}, gain: ${obj.props.gain} });`);
+  }
+  if (soundObjs.length) lines.push("");
+
+  // Schedule add()/remove() at every distinct inTime/outTime breakpoint,
+  // walking forward with await this.wait() between them -- construct()'s
+  // only timing primitive is its own sequential await chain.
+  const round = (t) => Math.round(t * 1000) / 1000;
+  const breakpoints = new Set([0, round(duration)]);
+  for (const obj of visualObjs) {
+    breakpoints.add(round(Math.min(obj.inTime, duration)));
+    if (obj.outTime != null) breakpoints.add(round(Math.min(obj.outTime, duration)));
+  }
+  const times = [...breakpoints].sort((a, b) => a - b);
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i];
+    for (const obj of visualObjs) {
+      if (round(obj.inTime) === t) lines.push(`    this.add(obj${obj.id});`);
+    }
+    for (const obj of visualObjs) {
+      if (obj.outTime != null && round(obj.outTime) === t && t !== round(duration)) lines.push(`    this.remove(obj${obj.id});`);
+    }
+    const next = times[i + 1];
+    if (next != null && next - t > 1e-6) lines.push(`    await this.wait(${(next - t).toFixed(2)});`);
+  }
+
+  lines.push(`  }`);
+  lines.push(`}`);
+  return lines.join("\n");
+}
+
+const exportModal = document.getElementById("export-modal");
+const exportCode = document.getElementById("export-code");
+document.getElementById("export-btn").addEventListener("click", () => {
+  exportCode.textContent = generateSceneCode();
+  exportModal.classList.add("open");
+});
+document.getElementById("close-export-btn").addEventListener("click", () => exportModal.classList.remove("open"));
+document.getElementById("copy-code-btn").addEventListener("click", () => {
+  navigator.clipboard?.writeText(exportCode.textContent);
+});
+
+// ---------------------------------------------------------------------------
+// Scene settings: duration (with an explicit override vs. auto-fit-content),
+// fps, frame size/aspect preset, background -- a composition/sequence
+// settings dialog, same idea as Premiere/After Effects/Animate's document
+// properties.
+// ---------------------------------------------------------------------------
+
+const ASPECT_PRESETS = {
+  "16:9": { width: 960, height: 540 },
+  "9:16": { width: 540, height: 960 },
+  "1:1": { width: 720, height: 720 },
+  "4:3": { width: 960, height: 720 },
+};
+
+const settingsModal = document.getElementById("settings-modal");
+const durationAuto = document.getElementById("duration-auto");
+const durationValue = document.getElementById("duration-value");
+const fpsValue = document.getElementById("fps-value");
+const aspectPreset = document.getElementById("aspect-preset");
+const widthValue = document.getElementById("width-value");
+const heightValue = document.getElementById("height-value");
+const backgroundValue = document.getElementById("background-value");
+
+function presetForSize(w, h) {
+  for (const [name, size] of Object.entries(ASPECT_PRESETS)) {
+    if (size.width === w && size.height === h) return name;
+  }
+  return "custom";
+}
+
+function refreshSettingsModal() {
+  durationAuto.checked = projectSettings.durationOverride == null;
+  durationValue.value = Math.round((projectSettings.durationOverride ?? projectDuration()) * 100) / 100;
+  durationValue.disabled = durationAuto.checked;
+  fpsValue.value = projectSettings.fps;
+  widthValue.value = projectSettings.width;
+  heightValue.value = projectSettings.height;
+  aspectPreset.value = presetForSize(projectSettings.width, projectSettings.height);
+  backgroundValue.value = projectSettings.background;
+}
+
+document.getElementById("scene-settings-btn").addEventListener("click", () => {
+  refreshSettingsModal();
+  settingsModal.classList.add("open");
+});
+document.getElementById("close-settings-btn").addEventListener("click", () => settingsModal.classList.remove("open"));
+
+durationAuto.addEventListener("change", () => {
+  beginChange();
+  projectSettings.durationOverride = durationAuto.checked ? null : (parseFloat(durationValue.value) || 6);
+  durationValue.disabled = durationAuto.checked;
+  refreshTimeline();
+  render();
+});
+durationValue.addEventListener("input", () => {
+  beginChange();
+  projectSettings.durationOverride = parseFloat(durationValue.value) || 0.5;
+  refreshTimeline();
+  render();
+});
+fpsValue.addEventListener("input", () => {
+  beginChange();
+  projectSettings.fps = Math.max(1, parseInt(fpsValue.value, 10) || 30);
+});
+aspectPreset.addEventListener("change", () => {
+  const preset = ASPECT_PRESETS[aspectPreset.value];
+  if (!preset) return; // "custom" -- leave width/height as they are
+  beginChange();
+  projectSettings.width = preset.width;
+  projectSettings.height = preset.height;
+  widthValue.value = preset.width;
+  heightValue.value = preset.height;
+  applyFrameSettings();
+});
+function onSizeInputChanged() {
+  beginChange();
+  projectSettings.width = Math.max(64, parseInt(widthValue.value, 10) || projectSettings.width);
+  projectSettings.height = Math.max(64, parseInt(heightValue.value, 10) || projectSettings.height);
+  aspectPreset.value = presetForSize(projectSettings.width, projectSettings.height);
+  applyFrameSettings();
+}
+widthValue.addEventListener("input", onSizeInputChanged);
+heightValue.addEventListener("input", onSizeInputChanged);
+backgroundValue.addEventListener("input", () => {
+  beginChange();
+  projectSettings.background = backgroundValue.value;
+  applyFrameSettings();
+});
+
+document.getElementById("onion-btn").addEventListener("click", (ev) => {
+  onionSkinEnabled = !onionSkinEnabled;
+  ev.currentTarget.classList.toggle("active", onionSkinEnabled);
+  render();
+});
+
+// ---------------------------------------------------------------------------
+
+function refreshAll() {
+  refreshLayerList();
+  refreshInspector();
+  refreshTimeline();
+  render();
+}
+
+addObject("circle");
+refreshAll();
+</script>
+</body>
+</html>

@@ -302,6 +302,22 @@ function findSvg(adaptor: any, node: any): any {
   return null;
 }
 
+// A DOMAdaptor-shaped shim (kind/getAttribute/childNodes -- the only three
+// methods collectGlyphs()/findSvg() actually call) over a REAL browser
+// Element tree, for CDN-loaded MathJax's output. mathjax-full's own
+// liteAdaptor (used by `_mj`) is a *virtual* lite-DOM; CDN MathJax
+// (`_cdnMathJax`, loaded via loadCdnMathJax() below) hands back genuine
+// `HTMLElement`s from `tex2svg()`, which don't share that interface --
+// this shim lets collectGlyphs()/findSvg() work unmodified against either.
+// Exported so the glyph-building path is testable with a hand-built fake
+// element tree, without needing jsdom or a real browser (see
+// test/mathtex-cdn-glyphs.test.ts).
+export const domAdaptor = {
+  kind: (n: any): string | undefined => (n?.tagName ? String(n.tagName).toLowerCase() : undefined),
+  getAttribute: (n: any, name: string): string | null => n?.getAttribute?.(name) ?? null,
+  childNodes: (n: any): any[] => Array.from(n?.children ?? []),
+};
+
 // --- environment wrapping ----------------------------------------------------
 // manim wraps the tex string in an environment (default "align*") before
 // handing it to LaTeX. MathJax doesn't need the environment for plain math,
@@ -336,17 +352,11 @@ function styleGlyph(mob: VMobject, fill: Color, stroke: Color, fo: number, sw: n
   mob.strokeOpacity = so;
 }
 
-function texToGlyphList(texString: string, config: MathTexConfig): VMobject[] {
-  if (!_mj) throw new Error("MathTex requires MathJax; call `await initMathTex()` once before constructing.");
-  const { adaptor, doc } = _mj;
-
-  const wrapped = wrapEnvironment(texString, config.texEnvironment);
-  const container = doc.convert(String(wrapped), { display: true });
-  const svgNode = findSvg(adaptor, container);
-  if (!svgNode) throw new Error("MathJax produced no <svg> for: " + texString);
-
-  const records = collectGlyphs(adaptor, svgNode);
-
+// Turn structural glyph records (from collectGlyphs, either lite-adaptor or
+// real-DOM sourced -- the records are backend-agnostic {type, ...} shapes)
+// into styled VMobjects. Shared by both the Node/lite-adaptor and browser/CDN
+// paths in texToGlyphList() below, and independently unit-testable.
+function recordsToGlyphs(records: any[], config: MathTexConfig): VMobject[] {
   const fillColor = Color.parse(config.color ?? config.fillColor ?? WHITE);
   const strokeColor = Color.parse(config.strokeColor ?? config.color ?? WHITE);
   const fillOpacity = config.fillOpacity ?? 1;
@@ -391,6 +401,41 @@ function texToGlyphList(texString: string, config: MathTexConfig): VMobject[] {
     }
   }
   return glyphs;
+}
+
+/**
+ * Build glyph VMobjects directly from a real browser `<svg>` Element (as
+ * produced by CDN MathJax's `tex2svg()`), via the domAdaptor shim above.
+ * Exported so this is independently testable with a hand-built fake element
+ * tree -- see test/mathtex-cdn-glyphs.test.ts.
+ */
+export function glyphsFromDomSvg(svgElement: any, config: MathTexConfig = {}): VMobject[] {
+  return recordsToGlyphs(collectGlyphs(domAdaptor, svgElement), config);
+}
+
+function texToGlyphList(texString: string, config: MathTexConfig): VMobject[] {
+  const wrapped = wrapEnvironment(texString, config.texEnvironment);
+
+  if (_mj) {
+    const { adaptor, doc } = _mj;
+    const container = doc.convert(String(wrapped), { display: true });
+    const svgNode = findSvg(adaptor, container);
+    if (!svgNode) throw new Error("MathJax produced no <svg> for: " + texString);
+    return recordsToGlyphs(collectGlyphs(adaptor, svgNode), config);
+  }
+
+  if (_cdnMathJax) {
+    // CDN MathJax's tex2svg() returns a real <mjx-container> HTMLElement (not
+    // a lite-adaptor virtual node) -- find its <svg> with a plain DOM query
+    // rather than the adaptor-based findSvg(), then hand it to the same
+    // glyph builder every other path uses via the domAdaptor shim.
+    const container = _cdnMathJax.tex2svg(String(wrapped), { display: true });
+    const svgEl = container?.querySelector?.("svg") ?? null;
+    if (!svgEl) throw new Error("MathJax produced no <svg> for: " + texString);
+    return glyphsFromDomSvg(svgEl, config);
+  }
+
+  throw new Error("MathTex requires MathJax; call `await initMathTex()` once before constructing.");
 }
 
 // --- legacy public helper: build a scaled/centered VGroup from a tex string --

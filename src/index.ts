@@ -55,7 +55,7 @@ export {
 } from "./mobject/text_shaping.ts";
 export type { TextShapingBackend, GlyphRunEntry, GlyphRunResult, BuildGlyphRunOptions } from "./mobject/text_shaping.ts";
 export { parsePathToSubpaths, subpathsToVMobject } from "./mobject/svg_path.ts";
-export { MathTex, Tex, SingleStringMathTex, texToVGroup, initMathTex, texToSVG } from "./mobject/mathtex.ts";
+export { MathTex, Tex, SingleStringMathTex, texToVGroup, initMathTex, texToSVG, glyphsFromDomSvg } from "./mobject/mathtex.ts";
 export { MathTexImage, mathTexImage } from "./mobject/mathtex_image.ts";
 export { ImageMobject } from "./mobject/image_mobject.ts";
 export { VideoMobject } from "./mobject/video_mobject.ts";
@@ -102,6 +102,7 @@ export { CanvasRenderer, Camera } from "./renderer/CanvasRenderer.ts";
 export { SVGRenderer, mobjectsToSVG } from "./renderer/SVGRenderer.ts";
 export type { SVGRenderOptions } from "./renderer/SVGRenderer.ts";
 export { Scene } from "./scene/Scene.ts";
+export { isSceneLike, makeScene, runConstruct, sampleSceneAt } from "./scene/orchestrate.ts";
 
 export {
   Animation, Transform, ReplacementTransform,
