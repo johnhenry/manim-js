@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.13
+
 ### Added
 - **`examples/e2e-feature-tour.ts`**: an end-to-end scene exercising the
   0.0.7-0.0.12 feature surface together through the real public
