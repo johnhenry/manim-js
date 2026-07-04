@@ -14,21 +14,48 @@ interface ZVertex {
 }
 
 export class ZBuffer {
+  // "Logical" size: what callers pass to the constructor/resize() and think
+  // in terms of (matches the final output resolution). Every rasterization
+  // method (triangle/triangleGouraud/line) still operates directly in this
+  // logical pixel space -- ZBuffer itself handles the internal supersample
+  // scale-up transparently, so no call site above this file needs to know
+  // about it.
+  logicalWidth!: number;
+  logicalHeight!: number;
+  // Internal supersample factor (>=1; 1 = no anti-aliasing, today's
+  // pre-existing behavior). Confirmed bug: this rasterizer's hard binary
+  // per-pixel edge tests (triangle()'s `w0 < 0 || w1 < 0 || w2 < 0` and
+  // line()'s per-step pixel-square stamping) produce badly aliased output
+  // for any 3D-scene geometry -- most visible on Text glyph outlines, but
+  // confirmed identical on ordinary VMobject curve strokes too (a general
+  // rasterizer limitation, not text-specific). Rendering internally at
+  // `superSample`x linear resolution and box-filtering down in blitTo()
+  // fixes this without touching the edge-test math at all. Opt-in (default
+  // 1, byte-identical to pre-fix behavior) since it costs O(superSample^2)
+  // more pixel work -- not free for a CPU software rasterizer.
+  superSample: number;
+  // Internal (possibly supersampled) buffer size -- what the rasterization
+  // methods actually index into.
   width!: number;
   height!: number;
   color!: Uint8ClampedArray;
   depth!: Float32Array;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, superSample = 1) {
+    this.superSample = Math.max(1, Math.round(superSample));
     this.resize(width, height);
   }
 
-  resize(width: number, height: number): void {
-    if (this.width === width && this.height === height) return;
-    this.width = width;
-    this.height = height;
-    this.color = new Uint8ClampedArray(width * height * 4);
-    this.depth = new Float32Array(width * height);
+  resize(width: number, height: number, superSample?: number): void {
+    const nextSuperSample = superSample != null ? Math.max(1, Math.round(superSample)) : this.superSample;
+    if (this.logicalWidth === width && this.logicalHeight === height && this.superSample === nextSuperSample) return;
+    this.superSample = nextSuperSample;
+    this.logicalWidth = width;
+    this.logicalHeight = height;
+    this.width = width * this.superSample;
+    this.height = height * this.superSample;
+    this.color = new Uint8ClampedArray(this.width * this.height * 4);
+    this.depth = new Float32Array(this.width * this.height);
   }
 
   clear(r: number, g: number, b: number): void {
@@ -54,8 +81,17 @@ export class ZBuffer {
     }
   }
 
-  // v0,v1,v2: {x, y, z} in pixel space with camera depth z. color: [r,g,b] 0-255.
-  triangle(v0: ZVertex, v1: ZVertex, v2: ZVertex, color: number[], alpha: number): void {
+  // Scale a vertex's x/y into the internal (possibly supersampled) buffer
+  // space; z/r/g/b are untouched (z is only ever compared, never indexed).
+  _s(v: ZVertex): ZVertex {
+    const s = this.superSample;
+    return s === 1 ? v : { ...v, x: v.x * s, y: v.y * s };
+  }
+
+  // v0,v1,v2: {x, y, z} in LOGICAL pixel space (the resolution passed to the
+  // constructor/resize()) with camera depth z. color: [r,g,b] 0-255.
+  triangle(v0In: ZVertex, v1In: ZVertex, v2In: ZVertex, color: number[], alpha: number): void {
+    const v0 = this._s(v0In), v1 = this._s(v1In), v2 = this._s(v2In);
     const { width, height, depth } = this;
     let minX = Math.max(0, Math.floor(Math.min(v0.x, v1.x, v2.x)));
     let maxX = Math.min(width - 1, Math.ceil(Math.max(v0.x, v1.x, v2.x)));
@@ -89,7 +125,9 @@ export class ZBuffer {
 
   // Like triangle(), but each vertex carries its own color {x,y,z,r,g,b} and the
   // color is barycentric-interpolated per pixel (Gouraud smooth shading).
-  triangleGouraud(v0: ZVertex, v1: ZVertex, v2: ZVertex, alpha: number): void {
+  // v0,v1,v2 in LOGICAL pixel space, same as triangle().
+  triangleGouraud(v0In: ZVertex, v1In: ZVertex, v2In: ZVertex, alpha: number): void {
+    const v0 = this._s(v0In), v1 = this._s(v1In), v2 = this._s(v2In);
     const { width, height, depth } = this;
     let minX = Math.max(0, Math.floor(Math.min(v0.x, v1.x, v2.x)));
     let maxX = Math.min(width - 1, Math.ceil(Math.max(v0.x, v1.x, v2.x)));
@@ -123,14 +161,17 @@ export class ZBuffer {
     }
   }
 
-  // Depth-tested thick line between pixel-space endpoints (with depth z each).
+  // Depth-tested thick line between LOGICAL pixel-space endpoints (with depth
+  // z each) and a LOGICAL-pixel halfWidth -- both scaled into buffer space
+  // here, same as triangle()/triangleGouraud().
   // `bias` nudges depth toward the viewer so edges sit atop the faces they trim.
-  line(p0: ZVertex, p1: ZVertex, halfWidth: number, color: number[], alpha: number, bias = 0): void {
+  line(p0In: ZVertex, p1In: ZVertex, halfWidth: number, color: number[], alpha: number, bias = 0): void {
+    const p0 = this._s(p0In), p1 = this._s(p1In);
     const { width, height, depth } = this;
     const dx = p1.x - p0.x, dy = p1.y - p0.y;
     const len = Math.hypot(dx, dy);
     const steps = Math.max(1, Math.ceil(len));
-    const hw = Math.max(0, Math.round(halfWidth));
+    const hw = Math.max(0, Math.round(halfWidth * this.superSample));
     const [r, g, b] = color;
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
@@ -153,10 +194,38 @@ export class ZBuffer {
     }
   }
 
-  // Copy the framebuffer into the 2D context.
+  // Copy the framebuffer into the 2D context, box-downsampling from the
+  // internal (possibly supersampled) buffer to the logical resolution --
+  // this box filter is what actually produces the anti-aliasing; everything
+  // above just rasterizes at higher resolution with the same hard edges as
+  // before.
   blitTo(ctx: CanvasRenderingContext2D): void {
-    const img = ctx.createImageData(this.width, this.height);
-    img.data.set(this.color);
+    const { logicalWidth: lw, logicalHeight: lh, superSample: s } = this;
+    if (s === 1) {
+      const img = ctx.createImageData(this.width, this.height);
+      img.data.set(this.color);
+      ctx.putImageData(img, 0, 0);
+      return;
+    }
+    const src = this.color;
+    const out = new Uint8ClampedArray(lw * lh * 4);
+    const n = s * s;
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        let r = 0, g = 0, b = 0, a = 0;
+        for (let sy = 0; sy < s; sy++) {
+          const srcY = y * s + sy;
+          for (let sx = 0; sx < s; sx++) {
+            const srcIdx = (srcY * this.width + (x * s + sx)) * 4;
+            r += src[srcIdx]; g += src[srcIdx + 1]; b += src[srcIdx + 2]; a += src[srcIdx + 3];
+          }
+        }
+        const outIdx = (y * lw + x) * 4;
+        out[outIdx] = r / n; out[outIdx + 1] = g / n; out[outIdx + 2] = b / n; out[outIdx + 3] = a / n;
+      }
+    }
+    const img = ctx.createImageData(lw, lh);
+    img.data.set(out);
     ctx.putImageData(img, 0, 0);
   }
 }

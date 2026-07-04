@@ -80,6 +80,14 @@ export class Camera {
   declare disableZBuffer?: boolean;
   declare flatShading?: boolean;
   declare focalDistance?: number;
+  // Opt-in anti-aliasing for the 3D z-buffer rasterizer (default 1 = off,
+  // byte-identical to pre-existing behavior). Renders the 3D pass internally
+  // at `superSample`x linear resolution and box-filters down -- see
+  // src/renderer/zbuffer.ts for why this rasterizer needs it (hard,
+  // unaliased per-pixel edge tests) and why it's opt-in (O(n^2) more pixel
+  // work, not free on a CPU rasterizer). No effect on the 2D vector-fill
+  // path, which is already anti-aliased by the underlying canvas backend.
+  declare superSample?: number;
   // An optional animatable "camera frame" mobject (a Rectangle). When set, its
   // size/center drive the viewport via preRender() — this is how
   // MovingCameraScene / ZoomedScene pan and zoom by animating a mobject.
@@ -97,6 +105,7 @@ export class Camera {
     this.frameCenter = config.frameCenter ?? [0, 0, 0];
     this.background = config.background ?? "#000000";
     if (config.zoom != null) this.zoom = config.zoom;
+    if (config.superSample != null) this.superSample = config.superSample;
   }
 
   // World coordinates -> pixel coordinates (y is flipped: world y-up).
@@ -178,8 +187,9 @@ export class CanvasRenderer {
     // Sync the viewport to an animatable camera frame (no-op when unset).
     this.camera.preRender?.();
     const { ctx, camera } = this;
-    if (!this._zb) this._zb = new ZBuffer(camera.pixelWidth, camera.pixelHeight);
-    this._zb.resize(camera.pixelWidth, camera.pixelHeight);
+    const superSample = camera.superSample ?? 1;
+    if (!this._zb) this._zb = new ZBuffer(camera.pixelWidth, camera.pixelHeight, superSample);
+    this._zb.resize(camera.pixelWidth, camera.pixelHeight, superSample);
     const bg = parseHexColor(camera.background);
     this._zb.clear(bg[0], bg[1], bg[2]);
 

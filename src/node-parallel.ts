@@ -31,7 +31,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import os from "node:os";
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 import { Camera, CanvasRenderer } from "./renderer/CanvasRenderer.ts";
-import { Scene } from "./scene/Scene.ts";
+import { Scene, computeRenderConfigHash } from "./scene/Scene.ts";
 import { QUALITIES } from "./index.ts";
 import { QUALITY_PRESETS, config as manimConfig } from "./_config.ts";
 import { discoverSegments, partitionSegments } from "./scene/render_frame.ts";
@@ -186,6 +186,16 @@ export async function renderSegmentRange(
   if (!camera.background) camera.background = r.background;
   const renderer = new CanvasRenderer(ctx, camera);
 
+  // See Scene.ts's computeRenderConfigHash() doc comment. Must use the exact
+  // same salt as node.ts's sequential path (and this file's own renderParallel()
+  // concat step below) so partials stay byte-compatible/shareable between them
+  // -- this file has no `transparent` option (not supported here), so it's
+  // always false, matching node.ts's default when unset.
+  const cacheConfigHash = computeRenderConfigHash({
+    pixelWidth: r.pixelWidth, pixelHeight: r.pixelHeight, background: r.background, fps: r.fps, camera,
+  });
+  const keyed = (h: string) => `${h}-${cacheConfigHash}`;
+
   mkdirSync(r.cacheDir, { recursive: true });
 
   const target = await loadSceneTarget(sceneModulePath, sceneExportName);
@@ -206,7 +216,7 @@ export async function renderSegmentRange(
       return { skip: true }; // not ours: advance time, no frames
     }
     // Ours: check the cache. If the partial already exists, skip re-encoding.
-    const partialPath = join(r.cacheDir, `${rec.hash}.${r.partialExt}`);
+    const partialPath = join(r.cacheDir, `${keyed(rec.hash)}.${r.partialExt}`);
     if (existsSync(partialPath)) {
       reused++;
       activeSeg = -2;
@@ -231,7 +241,7 @@ export async function renderSegmentRange(
   for (const [id, frames] of segMap) {
     if (!frames.length) continue;
     const hash = segHashes.get(id) ?? `seg${id}`;
-    const partialPath = join(r.cacheDir, `${hash}.${r.partialExt}`);
+    const partialPath = join(r.cacheDir, `${keyed(hash)}.${r.partialExt}`);
     if (!existsSync(partialPath)) {
       await encodeFrames(frames, {
         fps: r.fps, pixelWidth: r.pixelWidth, pixelHeight: r.pixelHeight,
@@ -257,6 +267,18 @@ export async function renderParallel(
   const verbose = options.verbose ?? false;
   const r = resolveRender(options);
   const workers = Math.max(1, Math.floor(options.workers ?? Math.max(1, os.cpus().length - 2)));
+
+  // See Scene.ts's computeRenderConfigHash() doc comment and renderSegmentRange()'s
+  // matching computation above -- must reconstruct the camera the same way each
+  // worker does, so this main-thread concat step's keys agree with what the
+  // workers actually wrote to disk.
+  const concatCamera = options.camera instanceof Camera
+    ? options.camera
+    : new Camera({ pixelWidth: r.pixelWidth, pixelHeight: r.pixelHeight, background: r.background, ...options.camera });
+  const cacheConfigHash = computeRenderConfigHash({
+    pixelWidth: r.pixelWidth, pixelHeight: r.pixelHeight, background: r.background, fps: r.fps, camera: concatCamera,
+  });
+  const keyed = (h: string) => `${h}-${cacheConfigHash}`;
 
   // 1. Discover the segment manifest cheaply (no PNG encoding).
   const target = await loadSceneTarget(sceneModulePath, sceneExportName);
@@ -347,10 +369,10 @@ export async function renderParallel(
   //    with a segment-per-play manifest there is no separate init bucket, so the
   //    concat list is simply the manifest's partials in order).
   const concatList: string[] = [];
-  const initPartial = join(r.cacheDir, `init.${r.partialExt}`);
+  const initPartial = join(r.cacheDir, `${keyed("init")}.${r.partialExt}`);
   if (existsSync(initPartial)) concatList.push(initPartial);
   for (const rec of manifest) {
-    const p = join(r.cacheDir, `${rec.hash}.${r.partialExt}`);
+    const p = join(r.cacheDir, `${keyed(rec.hash)}.${r.partialExt}`);
     if (existsSync(p)) concatList.push(p);
   }
 
