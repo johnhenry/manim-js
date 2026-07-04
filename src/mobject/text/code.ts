@@ -9,6 +9,10 @@ import { Text } from "./Text.ts";
 import type { TextConfig } from "./Text.ts";
 import { Rectangle, Dot } from "../geometry.ts";
 import * as V from "../../core/math/vector.ts";
+import { Transform } from "../../animation/Animation.ts";
+import { AnimationGroup } from "../../animation/composition.ts";
+import { TransformMatchingAuto } from "../../animation/auto_matching.ts";
+import type { AutoMatchingConfig } from "../../animation/auto_matching.ts";
 
 export interface CodeConfig extends TextConfig {
   language?: string;
@@ -137,6 +141,11 @@ export class Code extends VGroup {
   lineNumbers: VGroup;
   codeTokens: VGroup; // flat group of every colored token mobject
   background: any;
+  // Parallel to codeTokens.submobjects -- each token's (line, column) in the
+  // rendered source, used by diffTo() to disambiguate repeated identical
+  // tokens (autoKey() alone would otherwise match every "x" on a line to
+  // the same key, since it falls back to matching by .text).
+  private _tokenLoc: Array<{ line: number; col: number }> = [];
 
   constructor(codeOrConfig: string | CodeConfig = "", config: CodeConfig = {}) {
     super();
@@ -169,6 +178,7 @@ export class Code extends VGroup {
       const toks = tokenizeLine(rawLine, this.language, this.style);
       const lineGroup = new VGroup();
       let prev: Text | null = null;
+      let col = 0;
       for (const t of toks) {
         // Render leading spaces so indentation is preserved; empty tokens skip.
         const display = t.text === "" ? " " : t.text;
@@ -176,6 +186,8 @@ export class Code extends VGroup {
         if (prev) tokMob.nextTo(prev, V.RIGHT, 0.05);
         lineGroup.add(tokMob);
         this.codeTokens.add(tokMob);
+        this._tokenLoc.push({ line: idx, col });
+        col += t.text.length;
         prev = tokMob;
       }
       this.codeLines.add(lineGroup);
@@ -237,5 +249,40 @@ export class Code extends VGroup {
     // Order: background behind, then content.
     this.add(this.background, content);
     this.center();
+  }
+
+  // Seed each token's matchId as "text:line:col" -- autoKey() (auto_matching.ts)
+  // otherwise falls back to matching by .text alone, so two instances of the
+  // same identifier on one line (e.g. two "x"s) would both resolve to the
+  // same key and pair arbitrarily. Position-sensitive by design: see diffTo()'s
+  // own doc comment for the resulting tradeoff on inserted/removed lines.
+  private _seedMatchIds(): void {
+    const toks = this.codeTokens.submobjects;
+    for (let i = 0; i < toks.length; i++) {
+      const loc = this._tokenLoc[i];
+      (toks[i] as any).matchId = `${(toks[i] as any).text}:${loc.line}:${loc.col}`;
+    }
+  }
+
+  /**
+   * Morph this Code's tokens into `other`'s via TransformMatchingAuto (the
+   * Reveal.js Auto-Animate / Framer Motion layoutId idea), reusing the
+   * matching machinery as-is -- every token is already a `Text` mobject
+   * keyed by its own literal string, so no new engine code is needed, just
+   * disambiguating repeated tokens via `matchId` before matching.
+   *
+   * Known, deliberate limitation: because the key includes literal
+   * `line:col`, inserting or removing a line shifts every later token's
+   * key, so content below the change fades out/in rather than morphing --
+   * the same trade-off real manim's own `TransformMatchingTex` has. This is
+   * not a bug to fix here; a true diff/patience-alignment algorithm would be
+   * a separate, larger feature.
+   */
+  diffTo(other: Code, config: AutoMatchingConfig = {}): AnimationGroup {
+    this._seedMatchIds();
+    other._seedMatchIds();
+    const tokenAnims = new TransformMatchingAuto(this.codeTokens, other.codeTokens, config).animations;
+    const bg = new Transform(this.background, other.background);
+    return new AnimationGroup([...tokenAnims, bg]);
   }
 }
