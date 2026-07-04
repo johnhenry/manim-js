@@ -17,8 +17,8 @@ import type { MobjectConfig } from "../Mobject.ts";
 import { VMobject, VGroup } from "../VMobject.ts";
 import { Color } from "../../core/color.ts";
 import * as V from "../../core/math/vector.ts";
-import { parsePathToSubpaths, subpathsToVMobject } from "../svg_path.ts";
 import { getDefaultFont } from "../vectorized_text.ts";
+import { buildGlyphRun, measureGlyphRunWidth, UNITS_PER_WORLD } from "../text_shaping.ts";
 import type { ColorLike } from "../../core/types.ts";
 
 /** Configuration accepted by the raster Text mobject. */
@@ -34,6 +34,24 @@ export interface TextConfig extends MobjectConfig {
   strokeWidth?: number;
   strokeOpacity?: number;
   lineSpacing?: number;
+  /**
+   * Wrap width in world units. When set, long lines are greedily word-wrapped
+   * to fit (a single word wider than `width` still gets its own unbroken
+   * line -- no hyphenation). Explicit `\n`s in `text` are preserved as hard
+   * paragraph breaks and each paragraph is wrapped independently. Wrapping
+   * normalizes runs of spaces within a paragraph to single spaces; this is a
+   * simple greedy wrap (matching common practice elsewhere, e.g. Satori),
+   * not full Unicode line-breaking (UAX#14) -- CJK/no-space scripts and
+   * hyphenation are out of scope.
+   */
+  width?: number;
+  /**
+   * @deprecated Currently a no-op: no glyph shaping (GSUB ligature
+   * substitution) happens anywhere in this codebase yet, so there is nothing
+   * for this flag to disable. Wiring it up is planned alongside real text
+   * shaping (HarfBuzz); until then, setting this to `true` has no effect on
+   * rendered output.
+   */
   disableLigatures?: boolean;
   // text-to-* maps: substring -> value.
   t2c?: Record<string, ColorLike>;
@@ -47,6 +65,36 @@ export interface TextConfig extends MobjectConfig {
 
 // Rough per-character width factor for layout estimation without a context.
 export const CHAR_ASPECT = 0.55;
+
+// Greedy word-wrap: split `text` on explicit "\n" first (hard paragraph
+// breaks, preserved), then wrap each paragraph independently so no measured
+// line exceeds `width`, using the caller-supplied `measure` function (real
+// glyph-advance measurement when a vector font is available, or a
+// CHAR_ASPECT-based estimate otherwise -- see call sites). A single word
+// wider than `width` on its own still gets an unbroken line (no
+// hyphenation). Runs of spaces within a paragraph are normalized to a single
+// space; this is a simple greedy wrap, not full UAX#14 line-breaking.
+function wrapPlainText(text: string, width: number, measure: (line: string) => number): string {
+  const paragraphs = text.split("\n");
+  const wrappedParagraphs = paragraphs.map((para) => {
+    const words = para.split(/ +/);
+    const outLines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      if (word === "" && current === "") continue; // collapse leading/duplicate spaces
+      const candidate = current ? `${current} ${word}` : word;
+      if (current && measure(candidate) > width) {
+        outLines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current || outLines.length === 0) outLines.push(current);
+    return outLines.join("\n");
+  });
+  return wrappedParagraphs.join("\n");
+}
 
 /**
  * Estimate a text block's rendered width/height without constructing a
@@ -66,10 +114,13 @@ export const CHAR_ASPECT = 0.55;
 export function estimateTextSize(
   text: string,
   fontSize: number,
-  opts: { lineHeight?: number } = {},
+  opts: { lineHeight?: number; width?: number } = {},
 ): { width: number; height: number } {
   const lineHeight = opts.lineHeight ?? 1.2;
-  const lines = text.split("\n");
+  const source = opts.width != null
+    ? wrapPlainText(text, opts.width, (line) => line.length * fontSize * CHAR_ASPECT)
+    : text;
+  const lines = source.split("\n");
   const longest = lines.reduce((m, l) => Math.max(m, l.length), 1);
   return {
     width: longest * fontSize * CHAR_ASPECT,
@@ -165,8 +216,6 @@ export class RasterText extends Mobject {
 // Falls back to raster behaviour when no font is loaded.
 // ---------------------------------------------------------------------------
 
-const UNITS_PER_WORLD = 100; // opentype path px size; then scaled to world
-
 export class Text extends VGroup {
   // Common (both modes)
   text: string;
@@ -176,6 +225,7 @@ export class Text extends VGroup {
   slant: string;
   align: string;
   lineSpacing: number;
+  /** @deprecated Currently a no-op -- see {@link TextConfig.disableLigatures}. */
   disableLigatures: boolean;
 
   // Vector-mode data. `chars` is a VGroup of the per-glyph VMobjects (manim's
@@ -216,6 +266,22 @@ export class Text extends VGroup {
     this.opacity = config.opacity ?? 1;
 
     const font = config.font && typeof config.font !== "string" ? config.font : getDefaultFont();
+
+    if (config.width != null) {
+      // Real glyph-advance measurement when a vector font is available (so
+      // wrap decisions match what will actually render), else the same
+      // CHAR_ASPECT estimate the raster fallback itself uses. Deliberately
+      // uses the safe per-cluster measureGlyphRunWidth(), not
+      // font.getAdvanceWidth() -- the latter routes through opentype.js's
+      // whole-string shaping pipeline, which throws on lookup types some
+      // fonts (incl. this project's default dev/CI font) use.
+      const px = UNITS_PER_WORLD;
+      const scaleToWorld = (this.fontSize / px) * 1.4;
+      const measure = font
+        ? (line: string) => measureGlyphRunWidth(line, { font, px, scaleToWorld })
+        : (line: string) => estimateTextSize(line, this.fontSize).width;
+      this.text = wrapPlainText(this.text, config.width, measure);
+    }
 
     if (!font) {
       // FALLBACK: build as raster text (renderer draws it via drawText).
@@ -287,7 +353,6 @@ export class Text extends VGroup {
   private _buildGlyphs(font: any): void {
     const px = UNITS_PER_WORLD;
     const scaleToWorld = (this.fontSize / px) * 1.4;
-    const scaleFactor = px / font.unitsPerEm;
 
     this.chars = new VGroup();
     this._charSource = [];
@@ -301,19 +366,14 @@ export class Text extends VGroup {
     let sourceIndex = 0; // index into _plainText
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      const chars = Array.from(line);
-      let x = 0;
       const y = -li * lineHeight; // first line at top, subsequent below
-      const lineGlyphs: VMobject[] = [];
-      for (const ch of chars) {
-        const glyph = font.charToGlyph(ch);
-        const gp = glyph.getPath(x, 0, px); // y-down, baseline at 0
-        const d = gp.toPathData(3);
-        const mob = new VMobject();
-        if (d && d.length) {
-          const subs = parsePathToSubpaths(d);
-          subpathsToVMobject(mob, subs, { scale: scaleToWorld, translate: [0, 0, 0], flipY: true });
-        }
+      // One entry per grapheme cluster (not per code point/char) -- a base
+      // glyph plus any combining marks share a single VMobject and a single
+      // _charSource slot, so `chars`/index-based selection operate on
+      // clusters, matching how a user perceives "one character."
+      const { entries } = buildGlyphRun(line, { font, px, scaleToWorld });
+      for (const entry of entries) {
+        const mob = entry.mob;
         mob.fillColor = Color.parse(this.fillColor);
         mob.strokeColor = Color.parse(this.strokeColor);
         mob.fillOpacity = this.fillOpacity;
@@ -325,11 +385,8 @@ export class Text extends VGroup {
         this.chars.add(mob);
         this.add(mob);
         this._charSource.push(sourceIndex);
-        lineGlyphs.push(mob);
-        sourceIndex += 1;
-        x += (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * scaleFactor;
+        sourceIndex += entry.clusterLength;
       }
-      void lineGlyphs;
     }
 
     // Centre the whole block (manim positions text about its own centre).

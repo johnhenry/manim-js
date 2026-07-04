@@ -120,3 +120,17 @@ test("RasterText still carries _isText and a box", () => {
   assert.equal(r.points.length, 4);
   assert.equal(typeof r.currentFontHeight(), "number");
 });
+
+test("disableLigatures is currently a no-op -- no shaping exists yet to gate", () => {
+  // A future HarfBuzz-shaping backend will make this flag do something real
+  // (suppress GSUB liga/clig substitution); until then, it must not silently
+  // change output, so a caller who sets it isn't misled into thinking it did.
+  const withFlag = new Text("ffi ligature-prone", { fontSize: 0.5, disableLigatures: true });
+  const withoutFlag = new Text("ffi ligature-prone", { fontSize: 0.5, disableLigatures: false });
+  assert.equal(withFlag.chars.submobjects.length, withoutFlag.chars.submobjects.length);
+  for (let i = 0; i < withFlag.chars.submobjects.length; i++) {
+    const a = (withFlag.chars.submobjects[i] as VMobject).points;
+    const b = (withoutFlag.chars.submobjects[i] as VMobject).points;
+    assert.deepEqual(a, b, `glyph ${i} geometry should be identical regardless of disableLigatures`);
+  }
+});

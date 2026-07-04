@@ -11,10 +11,10 @@
 // this module — and thus the whole library — never requires a bare "opentype.js"
 // specifier to resolve in an unbundled browser. Font *usage* (charToGlyph etc.)
 // is all methods on an already-parsed Font object, needing no module reference.
-import { VMobject, VGroup } from "./VMobject.ts";
+import { VGroup } from "./VMobject.ts";
 import { Color } from "../core/color.ts";
 import * as V from "../core/math/vector.ts";
-import { parsePathToSubpaths, subpathsToVMobject } from "./svg_path.ts";
+import { buildGlyphRun, UNITS_PER_WORLD } from "./text_shaping.ts";
 import type { ColorLike } from "../core/types.ts";
 
 /** Configuration accepted by VText. */
@@ -81,8 +81,6 @@ export function setDefaultFontSync(font: any): any {
   return font;
 }
 
-const UNITS_PER_WORLD = 100; // opentype path uses px; we render at this px size then scale to world
-
 export class VText extends VGroup {
   text: string;
   fontSize: number;
@@ -115,27 +113,18 @@ export class VText extends VGroup {
   _buildGlyphs(font: any, config: VTextConfig): void {
     const px = UNITS_PER_WORLD;
     const scaleToWorld = this.fontSize / px * 1.4; // approx cap-height mapping
-    // Iterate characters with charToGlyph (avoids GSUB shaping, which opentype.js
-    // does not fully support for some fonts). One VMobject per glyph.
-    const chars = Array.from(this.text);
-    let x = 0;
-    const scaleFactor = px / font.unitsPerEm;
-    for (const ch of chars) {
-      const glyph = font.charToGlyph(ch);
-      const gp = glyph.getPath(x, 0, px); // y-down, baseline at 0
-      const d = gp.toPathData(3);
-      const mob = new VMobject();
-      if (d && d.length) {
-        const subs = parsePathToSubpaths(d);
-        subpathsToVMobject(mob, subs, { scale: scaleToWorld, translate: [0, 0, 0], flipY: true });
-      }
+    // Iterate by grapheme cluster with charToGlyph per code point (avoids GSUB
+    // shaping, which opentype.js does not fully support for some fonts). One
+    // VMobject per cluster (base glyph + any combining marks merged together).
+    const { entries } = buildGlyphRun(this.text, { font, px, scaleToWorld });
+    for (const entry of entries) {
+      const mob = entry.mob;
       mob.fillColor = Color.parse(this.fillColor);
       mob.strokeColor = Color.parse(this.strokeColor);
       mob.fillOpacity = config.fillOpacity ?? 1;
       mob.strokeWidth = config.strokeWidth ?? 0;
       mob.strokeOpacity = config.strokeOpacity ?? (config.strokeWidth ? 1 : 0);
       if (mob.points.length) this.add(mob);
-      x += (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * scaleFactor;
     }
   }
 
