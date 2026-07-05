@@ -28,7 +28,7 @@ export async function resolveSTLLoader(
 ): Promise<new () => { parse(bytesOrText: ArrayBuffer | string): any }> {
   if (options.STLLoader) return options.STLLoader;
   try {
-    const mod: any = await import("three/examples/jsm/loaders/STLLoader.js");
+    const mod: any = await import("three/addons/loaders/STLLoader.js");
     markThreeLoaded();
     return mod.STLLoader;
   } catch {

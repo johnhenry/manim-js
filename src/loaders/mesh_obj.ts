@@ -37,7 +37,7 @@ export interface MeshOBJImportOptions {
 export async function resolveOBJLoader(options: MeshOBJImportOptions): Promise<new () => { parse(text: string): any }> {
   if (options.OBJLoader) return options.OBJLoader;
   try {
-    const mod: any = await import("three/examples/jsm/loaders/OBJLoader.js");
+    const mod: any = await import("three/addons/loaders/OBJLoader.js");
     markThreeLoaded();
     return mod.OBJLoader;
   } catch {

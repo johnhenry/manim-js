@@ -92,7 +92,20 @@
     (`src/renderer/geometry_util.ts`) for this; `CanvasRenderer` has no CPU
     path for it (explicitly skipped, not mis-rasterized as its lightweight
     bounding-box proxy).
-  - GLTF import and compositor integration are tracked as follow-up work.
+  - **Compositor integration**: `examples/compositor/` gained an "Import 3D
+    (.obj/.stl)" layer type, following the exact existing Image/Video
+    upload/asset-cache pattern — uses the CPU `Polyhedron` tier specifically
+    (not `Mesh3D`), since the compositor's live preview only ever renders
+    through `CanvasRenderer`, which has no path for the GPU tier by design.
+    Fixed along the way: `loadMeshOBJ`/`loadMeshSTL`'s dynamic
+    `import("three/examples/jsm/...")` resolves fine under Node (bare
+    specifiers resolve via `node_modules`) but not in a plain browser, whose
+    native ES module loader can't resolve bare specifiers at all without an
+    import map — switched to the `"three/addons/"` alias (three's own
+    package.json exports both paths identically) and added the matching
+    `<script type="importmap">` to the compositor's `index.html`, mirroring
+    `examples/browser-three/index.html`'s existing convention.
+  - GLTF import remains a tracked follow-up.
 
 ### Fixed
 - **The render cache silently reused stale segments when only the

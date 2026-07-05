@@ -3,6 +3,19 @@
 <head>
 <meta charset="utf-8">
 <title>ecmanim Compositor</title>
+<!-- Only needed for the "Import 3D" (.obj/.stl) layer type -- loadMeshOBJ/
+     loadMeshSTL lazily import three's bundled loaders via this alias
+     (matching examples/browser-three/index.html's existing convention),
+     since a bare "three" specifier isn't resolvable by the browser's
+     native ES module loader without an import map. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/"
+  }
+}
+</script>
 <style>
   :root {
     --bg: #14171c;
@@ -175,6 +188,7 @@
             <option value="image">Image</option>
             <option value="video">Video</option>
             <option value="sound">Sound</option>
+            <option value="mesh3d">Import 3D (.obj/.stl)</option>
           </optgroup>
           <optgroup label="Advanced">
             <option value="code">Code</option>
@@ -284,6 +298,7 @@ import {
   KeyframeTrack, Line, Arrow, Star, Ellipse, Rectangle, RegularPolygon, Axes, VGroup, initMathTex, MathTex,
   getAudioData, getWaveformPortion, sampleSceneAt,
   ImageMobject, loadImage, loadVideo,
+  loadMeshOBJ, loadMeshSTL,
 } from "/dist/browser.js";
 // The full namespace, handed to user-authored "Code" layers (see the code
 // layer type below) so a snippet can reach any ecmanim export (MathTex,
@@ -435,6 +450,10 @@ const TYPE_DEFAULTS = {
   // re-derived from the stored blob on every load, never persisted itself.
   image: { assetId: null, fileName: null, fileUrl: null, width: 3, height: 3 },
   video: { assetId: null, fileName: null, fileUrl: null, width: 3, height: 3 },
+  // format ("obj"/"stl") is inferred from the chosen file's extension --
+  // no width/height of its own, unlike Image/Video: the universal `scale`
+  // common field already covers uniform resizing for an imported mesh.
+  mesh3d: { assetId: null, fileName: null, format: null },
   code: { code: CODE_LAYER_EXAMPLE },
   scene: { code: SCENE_LAYER_EXAMPLE },
 };
@@ -585,6 +604,8 @@ function cloneObjectDeep(obj) {
     clone._imageEl = obj._imageEl; // decoded bitmap is read-only -- safe to share directly
   } else if (obj.type === "video" && obj._videoProvider) {
     clone._videoProvider = obj._videoProvider; // decoded frames are read-only -- safe to share directly
+  } else if (obj.type === "mesh3d" && obj._meshMobject) {
+    clone._meshMobject = obj._meshMobject; // decoded Polyhedron/Mesh3D is read-only -- safe to share directly
   }
   // Compiled-code/scene/expr caches (obj._compiledSource, obj._sceneCompiledSource,
   // obj._exprSource, ...) are deliberately NOT copied -- they're all keyed by
@@ -808,7 +829,7 @@ function selected() {
   return objects.find((o) => o.id === selectedId) ?? null;
 }
 
-const NO_COLOR_FIELD_TYPES = new Set(["code", "scene", "image", "video"]);
+const NO_COLOR_FIELD_TYPES = new Set(["code", "scene", "image", "video", "mesh3d"]);
 function fieldsFor(obj) {
   // Code/Scene pick their own colors internally, and Image/Video are already
   // full-color raster content -- a global "Color" tint field wouldn't map to
@@ -1149,6 +1170,19 @@ function buildMobject(obj) {
         color: obj._videoError ? "#ff5555" : "#7b8290", fontSize: 0.3,
       });
     }
+  } else if (obj.type === "mesh3d") {
+    // .copy() every render -- same "never re-transform a persistent
+    // instance" rule as every other cached-asset type above, so rotate/
+    // scale (both relative transforms) never compound across renders. The
+    // decoded Polyhedron/Mesh3D itself is built once on file choice and
+    // never touched directly.
+    if (obj._meshMobject) {
+      mob = obj._meshMobject.copy();
+    } else {
+      mob = new Text(obj._meshError ? `⚠ ${obj._meshError}` : obj.props.fileName ? "loading mesh…" : "no mesh", {
+        color: obj._meshError ? "#ff5555" : "#7b8290", fontSize: 0.3,
+      });
+    }
   }
   // Rotate/scale about the shape's own (pre-move) center, THEN move to its
   // final position -- so rotation/scale never orbits it away from (x, y).
@@ -1458,6 +1492,7 @@ function refreshInspector() {
   if (obj.type === "scene") renderSceneSection(obj);
   if (obj.type === "image") renderImageSection(obj);
   if (obj.type === "video") renderVideoSection(obj);
+  if (obj.type === "mesh3d") renderMesh3DSection(obj);
 
   renderTimingSection(obj);
 }
@@ -1741,6 +1776,22 @@ async function hydrateAssetObject(obj, blob, { applyDefaults = false } = {}) {
     } catch (e) {
       obj._videoError = e.message;
     }
+  } else if (obj.type === "mesh3d") {
+    obj._meshError = null;
+    obj._meshMobject = null;
+    refreshInspector();
+    try {
+      const fileName = (obj.props.fileName || "").toLowerCase();
+      const format = fileName.endsWith(".stl") ? "stl" : "obj";
+      obj.props.format = format;
+      // STL can be binary -- always read raw bytes (STLLoader accepts an
+      // ArrayBuffer for both binary and ASCII STL); OBJ is always plain text.
+      obj._meshMobject = format === "stl"
+        ? await loadMeshSTL(await blob.arrayBuffer())
+        : await loadMeshOBJ(await blob.text());
+    } catch (e) {
+      obj._meshError = e.message;
+    }
   }
 
   refreshInspector();
@@ -1877,6 +1928,44 @@ function renderVideoSection(obj) {
   nameLine.className = "sound-file-name";
   nameLine.textContent = assetStatusText(obj, obj._videoProvider, obj._videoError,
     obj._videoProvider ? ` (${obj._videoProvider.duration.toFixed(1)}s)` : "");
+  inspectorFields.appendChild(nameLine);
+}
+
+// ---------------------------------------------------------------------------
+// Mesh3D layer: imports a .obj/.stl file into a Polyhedron (ecmanim's CPU/
+// "Tier A" mesh-import path -- see ~/.claude/plans/let-s-create-a-plan-cozy-
+// wind.md). Deliberately NOT the GPU Mesh3D/loadMesh3D tier: the compositor's
+// live preview only ever uses CanvasRenderer, which has no CPU rendering
+// path for that tier by design (see src/mobject/mesh3d.ts) -- a mesh
+// imported that way would simply never appear on screen here. buildMobject()
+// copies the decoded Polyhedron fresh each render, same "never re-transform
+// a persistent instance" rule as Image/Video, so rotate/scale never compound.
+// ---------------------------------------------------------------------------
+
+function renderMesh3DSection(obj) {
+  const header = document.createElement("div");
+  header.className = "section-label";
+  header.textContent = "3D Mesh";
+  inspectorFields.appendChild(header);
+
+  const fileBtn = document.createElement("button");
+  fileBtn.className = "sound-file-btn";
+  fileBtn.textContent = obj.props.fileName ? "Change mesh…" : "Choose .obj/.stl file…";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = ".obj,.stl";
+  fileInput.style.display = "none";
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (file) loadAssetFile(obj, file);
+  });
+  fileBtn.addEventListener("click", () => fileInput.click());
+  inspectorFields.append(fileBtn, fileInput);
+
+  const nameLine = document.createElement("div");
+  nameLine.className = "sound-file-name";
+  nameLine.textContent = assetStatusText(obj, obj._meshMobject, obj._meshError,
+    obj._meshMobject ? ` (${obj._meshMobject.facesList.length} faces, ${obj._meshMobject.vertexCoords.length} verts)` : "");
   inspectorFields.appendChild(nameLine);
 }
 
@@ -2424,9 +2513,12 @@ function generateSceneCode() {
   // from the decoded provider's current frame (see the "video" branch
   // below) -- needed even when no Image LAYER exists at all.
   const usesVideoRebuild = visualObjs.some((o) => o.type === "video" && Object.keys(o.tracks).length > 0);
-  // Any tracked object -- of ANY type -- now goes through a VGroup-wrapped
-  // Rebuild()+addUpdater() (see the per-object loop below), so VGroup is
-  // needed whenever anything at all is animated, not just graph/code/scene.
+  const usesMeshOBJ = visualObjs.some((o) => o.type === "mesh3d" && o.props.format !== "stl");
+  const usesMeshSTL = visualObjs.some((o) => o.type === "mesh3d" && o.props.format === "stl");
+  // Any tracked object -- of ANY type, mesh3d included -- now goes through a
+  // VGroup-wrapped Rebuild()+addUpdater() (see the per-object loop below),
+  // so VGroup is needed whenever anything at all is animated, not just
+  // graph/code/scene (usesTracks already covers a tracked mesh3d object).
   const usesVGroup = usesGraph || usesCode || usesScene || usesTracks;
   const duration = projectDuration();
   const lines = [];
@@ -2438,6 +2530,12 @@ function generateSceneCode() {
     ...(usesVGroup ? ["VGroup"] : []),
     ...(usesScene ? ["sampleSceneAt"] : []),
     ...(usesImage || usesVideoRebuild ? ["ImageMobject"] : []),
+    // loadMeshOBJ/loadMeshSTL parse (via three's own bundled loaders) rather
+    // than decode a browser-specific media element, so -- unlike loadImage/
+    // loadVideo -- they're isomorphic and live in the main "ecmanim" barrel,
+    // no environment-specific subpath needed.
+    ...(usesMeshOBJ ? ["loadMeshOBJ"] : []),
+    ...(usesMeshSTL ? ["loadMeshSTL"] : []),
   ];
   lines.push(`import { ${imports.join(", ")} } from "ecmanim";`);
   // loadImage()/loadVideo() are NOT exported from the isomorphic "ecmanim"
@@ -2695,6 +2793,43 @@ function generateSceneCode() {
         lines.push(`      const t = Math.max(0, scene.time - ${obj.inTime.toFixed(3)});`);
         lines.push(`      const frame = ${varName}Provider.frameAt(t) ?? ${varName}Provider.frameAt(0);`);
         lines.push(`      const wrap = new VGroup(new ImageMobject(frame, { width: ${val("width", p.width)}, height: ${val("height", p.height)} }));`);
+        lines.push(`      wrap.rotate(${rotRadExpr});`);
+        lines.push(`      wrap.scale(${scaleExpr});`);
+        lines.push(`      ${varName}.submobjects = wrap.submobjects;`);
+        lines.push(`      ${varName}.moveTo([${val("x", p.x)}, ${val("y", p.y)}, 0]);`);
+        lines.push(`      ${varName}.setOpacity(${val("opacity", p.opacity)});`);
+        lines.push(`    }`);
+        lines.push(`    ${varName}Rebuild();`);
+        lines.push(`    ${varName}.addUpdater(() => ${varName}Rebuild());`);
+      }
+    } else if (obj.type === "mesh3d") {
+      // Deliberately the CPU/Polyhedron tier (loadMeshOBJ/loadMeshSTL), not
+      // the GPU Mesh3D/loadMesh3D tier -- Polyhedron's rotate/scale/moveTo
+      // work via real per-point mutation, exactly like every other simple
+      // shape type, so it needs no special per-frame handling beyond the
+      // same "copy() a persistent, already-parsed instance fresh each tick"
+      // rule Image/Video already use to avoid compounding.
+      const isSTL = obj.props.format === "stl";
+      const fileName = obj.props.fileName || (isSTL ? "model.stl" : "model.obj");
+      lines.push(`    // NOTE: point this at your actual mesh file -- the compositor only holds an in-browser blob reference, not a real path.`);
+      lines.push(`    // loadMeshOBJ/loadMeshSTL are isomorphic -- this fetch() call assumes a`);
+      lines.push(`    // browser; from Node, read the file instead, e.g.:`);
+      lines.push(`    //   ${isSTL ? "await loadMeshSTL(fs.readFileSync(path))" : 'await loadMeshOBJ(fs.readFileSync(path, "utf8"))'}`);
+      if (isSTL) {
+        lines.push(`    const ${varName}Mesh = await loadMeshSTL(await (await fetch(${jsLiteral("./" + fileName)})).arrayBuffer());`);
+      } else {
+        lines.push(`    const ${varName}Mesh = await loadMeshOBJ(await (await fetch(${jsLiteral("./" + fileName)})).text());`);
+      }
+      if (!hasTracks) {
+        lines.push(`    const ${varName} = ${varName}Mesh;`);
+        if (hasRotate) lines.push(`    ${varName}.rotate(${rotRadExpr});`);
+        if (hasScale) lines.push(`    ${varName}.scale(${scaleExpr});`);
+        lines.push(`    ${varName}.moveTo([${p.x}, ${p.y}, 0]);`);
+        lines.push(`    ${varName}.setOpacity(${p.opacity});`);
+      } else {
+        lines.push(`    const ${varName} = new VGroup();`);
+        lines.push(`    function ${varName}Rebuild() {`);
+        lines.push(`      const wrap = ${varName}Mesh.copy();`);
         lines.push(`      wrap.rotate(${rotRadExpr});`);
         lines.push(`      wrap.scale(${scaleExpr});`);
         lines.push(`      ${varName}.submobjects = wrap.submobjects;`);
