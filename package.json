@@ -38,6 +38,14 @@
     "./studio": {
       "types": "./dist/studio.d.ts",
       "default": "./dist/studio.js"
+    },
+    "./physics/rapier2d": {
+      "types": "./dist/physics/rapier2d.d.ts",
+      "default": "./dist/physics/rapier2d.js"
+    },
+    "./physics/rapier3d": {
+      "types": "./dist/physics/rapier3d.d.ts",
+      "default": "./dist/physics/rapier3d.js"
     }
   },
   "bin": {
@@ -68,6 +76,8 @@
   ],
   "license": "MIT",
   "optionalDependencies": {
+    "@dimforge/rapier2d-compat": "^0.19.3",
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "@napi-rs/canvas": "^0.1.100",
     "harfbuzzjs": "^1.4.0",
     "three": "^0.185.1",
