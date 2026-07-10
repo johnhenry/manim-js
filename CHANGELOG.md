@@ -34,6 +34,26 @@
   centered lines. Styling is a pure function of the caption clock: `seekMs`
   in either direction and updater-driven playback land on identical frames.
 
+- **GeoJSON maps** (`src/loaders/geojson_loader.ts`): `loadGeoJSON(textOrObject,
+  {projection, nameProperty, width/height/point, simplifyTolerance})` returns a
+  `GeoMap` whose `regions` are addressable by feature name (`byName` for
+  choropleths) and whose `project([lon, lat])` maps coordinates through the
+  same fit transform — markers and arcs land exactly on their regions.
+  Polygon/MultiPolygon (holes as opposite-winding subpaths, safe under both
+  evenodd and nonzero fills), LineString/MultiLineString (stroke-only),
+  Douglas-Peucker simplification, `mercator`/`equirectangular`/custom
+  projections (`src/loaders/geo_projection.ts`). Synchronous (pure JSON+math).
+
+- **ParticleSystem** (`src/mobject/particles.ts`): deterministic particles —
+  every particle is a closed-form function of (seed, index, time), with
+  analytic ballistics under gravity + linear drag, so scrubbing, backward
+  seeks, `alwaysRedraw`, and the render cache work unmodified. Emitter
+  point/disc/line, rate/lifetime/speed/spread ranges, size + opacity over
+  life, `colorRamp`, `maxParticles` cap, circle/square shapes, `setTime()`
+  explicit clock and deterministic `burst(atT, count)` cohorts. Rasterized
+  directly by CanvasRenderer (2D and 3D-overlay; effects compose); SVG/WebGL
+  backends skip (documented in `docs/renderers.md`).
+
 - **Visual effects pipeline** (`src/core/effects.ts` + renderer support):
   per-mobject `blur` / `glow` / `dropShadow` / `colorAdjust`
   (brightness/contrast/saturate/hueRotate) / seeded `noise`, via a fluent

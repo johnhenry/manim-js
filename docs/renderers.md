@@ -247,6 +247,16 @@ parameters, so the content-hash partial-movie render cache stays sound.
 Prefer `frameEffects` for scene-wide looks — per-mobject effects cost one
 offscreen composite per affected leaf per frame.
 
+### ParticleSystem
+
+`ParticleSystem` (`src/mobject/particles.ts`) is Canvas-2D-tier: the
+CanvasRenderer rasterizes each live particle directly (`drawParticles`), in
+2D scenes and as a 3D overlay. Every particle is a closed-form function of
+(seed, index, time) — scrubbing, backward seeks, and the render cache all
+work unmodified, and per-mobject effects compose with it (the offscreen
+effects path draws particles too). SVGRenderer and ThreeRenderer skip
+particle systems (same silent-skip convention as Mesh3D on the CPU tier).
+
 ## GPU post-processing (ThreeRenderer)
 
 The WebGL backend supports EffectComposer-based post-processing via

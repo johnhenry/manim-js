@@ -311,7 +311,7 @@ export class CanvasRenderer {
         // skip
       } else if (m.points && m.points.length) {
         if (fif || fo) fixed.push({ mob: m, fixedInFrame: fif, fixedOrient: fo });
-        else if (m._isText || m._isImage) overlay.push(m);
+        else if (m._isText || m._isImage || m._isParticles) overlay.push(m);
         else this._rasterMobject(m);
       }
       for (const s of m.submobjects) draw(s, fif, fo);
@@ -327,6 +327,7 @@ export class CanvasRenderer {
       for (const m of overlay) {
         if (m.effects?.length) this._drawWithEffects(m);
         else if (m._isImage) this.drawImage(m);
+        else if (m._isParticles) this.drawParticles(m);
         else this.drawText(m);
       }
       for (const { mob, fixedInFrame } of fixed) this._drawFixed(mob, fixedInFrame);
@@ -400,6 +401,7 @@ export class CanvasRenderer {
     try {
       if (mob._isText) this.drawText(mob);
       else if (mob._isImage) this.drawImage(mob);
+      else if (mob._isParticles) this.drawParticles(mob);
       else this.drawVMobject(mob);
     } finally {
       (camera as any).toPixel = savedToPixel;
@@ -505,6 +507,7 @@ export class CanvasRenderer {
       if (effects?.length) this._drawWithEffects(mob, effects);
       else if (mob._isText) this.drawText(mob);
       else if (mob._isImage) this.drawImage(mob);
+      else if (mob._isParticles) this.drawParticles(mob);
       else if (mob._cacheStatic) this._drawCachedVMobject(mob);
       else this.drawVMobject(mob);
     }
@@ -587,6 +590,7 @@ export class CanvasRenderer {
     try {
       if (mob._isText) this.drawText(mob);
       else if (mob._isImage) this.drawImage(mob);
+      else if (mob._isParticles) this.drawParticles(mob);
       else this.drawVMobject(mob);
     } finally {
       this.ctx = savedCtx;
@@ -677,6 +681,7 @@ export class CanvasRenderer {
         if (filterStr) (ctx as any).filter = filterStr;
         if (mob._isText) this.drawText(mob);
         else if (mob._isImage) this.drawImage(mob);
+        else if (mob._isParticles) this.drawParticles(mob);
         else this.drawVMobject(mob);
       } finally {
         ctx.restore();
@@ -748,6 +753,38 @@ export class CanvasRenderer {
     try {
       ctx.drawImage(mob.image, minx, miny, maxx - minx, maxy - miny);
     } catch { /* unsupported drawable */ }
+    ctx.restore();
+  }
+
+  // Draw a ParticleSystem (src/mobject/particles.ts): each live particle is
+  // computed closed-form for the system's clock and rasterized directly --
+  // thousands of fills, not thousands of mobjects.
+  drawParticles(mob: any): void {
+    const { ctx, camera } = this;
+    const mobOpacity = mob.opacity ?? 1;
+    if (mobOpacity <= 0) return;
+    const particles = mob.sampleParticles();
+    if (!particles.length) return;
+    // World-units -> pixels scale from the live projection (honors zoom).
+    const [x0] = camera.toPixel([0, 0, 0]);
+    const [x1] = camera.toPixel([1, 0, 0]);
+    const pxPerUnit = Math.abs(x1 - x0) || 1;
+    const square = mob.shape === "square";
+    ctx.save();
+    for (const p of particles) {
+      const alpha = p.opacity * mobOpacity;
+      if (alpha <= 0) continue;
+      const [px, py] = camera.toPixel([p.x, p.y, 0]);
+      const d = Math.max(0.5, p.size * pxPerUnit);
+      ctx.fillStyle = p.color.toRGBAString(alpha);
+      if (square) {
+        ctx.fillRect(px - d / 2, py - d / 2, d, d);
+      } else {
+        ctx.beginPath();
+        ctx.arc(px, py, d / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     ctx.restore();
   }
 
