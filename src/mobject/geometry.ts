@@ -308,6 +308,8 @@ export class Rectangle extends Polygon {
     super(verts, config);
     this.width = w;
     this.height = h;
+    // Parity with Circle/Text: `point` places the shape's center.
+    if (config.point) this.moveTo(config.point);
   }
 }
 

@@ -50,7 +50,17 @@ export class CaptionTrack extends RasterText {
 
   private _render(): void {
     const c = captionAt(this.captions, this._elapsedMs);
-    this.text = c ? c.text : "";
+    const newText = c ? c.text : "";
+    if (newText !== this.text) {
+      // Rebuild the box for the new cue — the karaoke reveal clips to the
+      // box width, so a stale box (e.g. from the initial "") would clip the
+      // whole caption away. _buildBox() re-centers on the origin, so restore
+      // the track's anchor afterwards.
+      const center = this.getCenter();
+      this.text = newText;
+      this._buildBox();
+      this.moveTo(center);
+    }
     if (this.karaoke && c) {
       const span = Math.max(1, c.endMs - c.startMs);
       this.revealFraction = Math.max(0, Math.min(1, (this._elapsedMs - c.startMs) / span));

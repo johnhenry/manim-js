@@ -139,6 +139,15 @@
   docs section with the user-shader contract.
 
 ### Fixed
+- **Rectangle/RoundedRectangle/Square ignored `point`**: Circle and Text
+  honored the `point` config but the rectangle family silently dropped it,
+  leaving shapes at the origin. All three now place their center at `point`.
+
+- **CaptionTrack karaoke clipped captions away after the first cue**: the
+  reveal rectangle was sized from the initial (usually empty) text's box and
+  never rebuilt, so later cues rendered zero-width under `karaoke: true`.
+  The box now rebuilds on every cue change (anchor preserved).
+
 - **Vector-mode whitespace Text collapsed layouts**: a `Text(" ")` built with
   a vector font produced no glyph outlines, so its bounding box degenerated
   to a point at the origin — any `nextTo` chain through a space token

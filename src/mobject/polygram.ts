@@ -218,6 +218,8 @@ export class RoundedRectangle extends Polygram {
     this.height = h;
     this.cornerRadius = config.cornerRadius ?? 0.5;
     if (this.cornerRadius > 0) this.roundCorners(this.cornerRadius);
+    // Parity with Circle/Text: `point` places the shape's center.
+    if ((config as any).point) this.moveTo((config as any).point);
   }
 }
 
