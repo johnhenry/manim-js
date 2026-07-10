@@ -60,7 +60,31 @@ export interface SceneConfig {
   frameHandler?: FrameHandler;
   /** Schema-validated scene params (Remotion-style) — see scene_params.ts. */
   params?: Record<string, any>;
+  /** Named time-event durations for waitUntil() (Motion Canvas's editor-
+   *  draggable time events, expressed as config): `{ intro: 2.5 }` makes
+   *  `waitUntil("intro")` hold 2.5s regardless of its inline fallback. */
+  timeEvents?: Record<string, number>;
   [key: string]: any;
+}
+
+/** Handle to a background task started with Scene.spawn(). */
+export interface TaskHandle {
+  /** Stop the task where it is (its current animation is left mid-state). */
+  cancel(): void;
+  /** Emit frames (holding the scene) until the task runs to completion.
+   *  Resolves immediately if the task is already done or canceled. */
+  join(): Promise<void>;
+  /** True once the task's generator is exhausted or cancel() was called. */
+  readonly done: boolean;
+}
+
+// Internal background-task record: an iterator of animation steps advanced
+// dt-by-dt from the play()/wait() frame loops.
+interface BackgroundTask {
+  iterator: Iterator<any>;
+  current: { anim?: any; runTime: number; elapsed: number } | null;
+  done: boolean;
+  onDone: Array<() => void>;
 }
 
 export class Scene {
@@ -75,6 +99,12 @@ export class Scene {
   time: number;
   frameCount: number;
   sounds: SceneSound[];
+  /** waitUntil() duration overrides by event name (see SceneConfig.timeEvents). */
+  timeEvents: Record<string, number>;
+  /** Chronological record of waitUntil() events: name + the scene time at
+   *  which each STARTED (tooling / assertions can read the timeline back). */
+  timeEventRecords: Array<{ name: string; time: number; duration: number }>;
+  private _tasks: BackgroundTask[] = [];
   /** Property-keyframe tracks created via track() (mirrors sounds/sections). */
   keyframeTracks: PlayableKeyframeTrack<any>[];
 
@@ -112,6 +142,8 @@ export class Scene {
     this.time = 0;
     this.frameCount = 0;
     this.sounds = [];
+    this.timeEvents = config.timeEvents ?? {};
+    this.timeEventRecords = [];
     this.keyframeTracks = [];
     this.sections = [];
     this._sectionId = 0;
@@ -404,6 +436,7 @@ export class Scene {
         a.interpolate(localAlpha);
       }
       this.updateMobjects(dt);
+      this._tickTasks(dt);
       this.time += dt;
       if (skip) this.frameCount++;
       else await this.emitFrame();
@@ -442,12 +475,140 @@ export class Scene {
 
     for (let f = 0; f < nFrames; f++) {
       this.updateMobjects(dt);
+      this._tickTasks(dt);
       this.time += dt;
       if (skip) this.frameCount++;
       else await this.emitFrame();
     }
     this.playRecords.push({ index: playIndex, kind: "wait", hash, startFrame, endFrame: this.frameCount });
     return this;
+  }
+
+  /**
+   * Hold at a NAMED time event (Motion Canvas's `waitUntil`). The hold
+   * duration is `timeEvents[name]` from SceneConfig when present, else
+   * `fallbackDuration` — the config map is the editor-less equivalent of
+   * MC's draggable events: retime a scene without touching construct().
+   */
+  async waitUntil(name: string, fallbackDuration = 1): Promise<this> {
+    const duration = this.timeEvents[name] ?? fallbackDuration;
+    this.timeEventRecords.push({ name, time: this.time, duration });
+    this.log("waitUntil", `waitUntil: ${name} (${duration}s)`, { name, duration });
+    if (duration <= 0) return this;
+    return this.wait(duration);
+  }
+
+  /**
+   * Start a BACKGROUND task (Motion Canvas's `spawn`): a generator yielding
+   * animation steps that advance alongside the foreground play()/wait()
+   * frames. Yield an Animation to run it, or a number to idle that many
+   * seconds. The task only progresses while frames are being emitted (it is
+   * ticked by the same clock as updaters), so it is fully deterministic.
+   *
+   * ```ts
+   * const orbit = scene.spawn(function* () {
+   *   while (true) yield new Rotate(dot, { angle: Math.PI, runTime: 2 });
+   * });
+   * await scene.play(...foreground...);
+   * orbit.cancel();
+   * ```
+   */
+  spawn(source: (() => Iterator<any> | Iterable<any>) | Iterator<any> | Iterable<any>): TaskHandle {
+    let it: Iterator<any>;
+    const resolved = typeof source === "function" ? (source as () => any)() : source;
+    if (resolved && typeof (resolved as any)[Symbol.iterator] === "function") {
+      it = (resolved as Iterable<any>)[Symbol.iterator]();
+    } else {
+      it = resolved as Iterator<any>;
+    }
+    const task: BackgroundTask = { iterator: it, current: null, done: false, onDone: [] };
+    this._tasks.push(task);
+    const finish = () => {
+      if (task.done) return;
+      task.done = true;
+      for (const cb of task.onDone) cb();
+      task.onDone.length = 0;
+    };
+    return {
+      cancel: () => finish(),
+      join: async () => {
+        while (!task.done) await this.wait(1 / this.fps);
+      },
+      get done() { return task.done; },
+    };
+  }
+
+  /** Sugar over spawn(): run `factory()`'s animation forever (MC's infinite
+   *  `loop`). Cancel the returned handle to stop it. */
+  loopForever(factory: () => any): TaskHandle {
+    return this.spawn(function* () {
+      for (;;) yield factory();
+    });
+  }
+
+  // Advance every live background task by dt: pull the next step from its
+  // iterator when idle, interpolate the current animation, finish and move
+  // on when it completes. Runs from the play()/wait() frame loops right
+  // after updateMobjects — background tasks are clocked exactly like
+  // updaters and never emit frames themselves.
+  private _tickTasks(dt: number): void {
+    if (this._tasks.length === 0) return;
+    for (const task of this._tasks) {
+      if (task.done) continue;
+      let budget = dt;
+      let pulls = 0;
+      // A step can complete mid-frame; the remainder of the frame flows into
+      // the next step so long chains don't drift by a frame per step. The
+      // pull cap breaks a generator that yields zero-duration steps forever
+      // (`while (true) yield 0;`) instead of hanging the frame loop.
+      while (budget > 1e-12 && !task.done && pulls < 1000) {
+        if (!task.current) {
+          pulls++;
+          const next = task.iterator.next();
+          if (next.done) {
+            task.done = true;
+            for (const cb of task.onDone) cb();
+            task.onDone.length = 0;
+            break;
+          }
+          const step = next.value;
+          if (typeof step === "number") {
+            task.current = { runTime: Math.max(0, step), elapsed: 0 };
+          } else if (step && typeof step.begin === "function") {
+            const anim = step._isAnimateBuilder ? step.build() : step;
+            anim.begin();
+            for (const m of anim.getMobjectsToIntroduce?.() ?? []) this.add(m);
+            task.current = { anim, runTime: Math.max(anim.runTime ?? 0, 0), elapsed: 0 };
+          } else if (step && step._isAnimateBuilder) {
+            const anim = step.build();
+            anim.begin();
+            for (const m of anim.getMobjectsToIntroduce?.() ?? []) this.add(m);
+            task.current = { anim, runTime: Math.max(anim.runTime ?? 0, 0), elapsed: 0 };
+          } else {
+            // Unknown step (null/undefined/other): skip it.
+            task.current = { runTime: 0, elapsed: 0 };
+          }
+        }
+        const cur = task.current!;
+        const advance = Math.min(budget, cur.runTime - cur.elapsed);
+        cur.elapsed += advance;
+        budget -= advance;
+        if (cur.anim) {
+          const alpha = cur.runTime === 0 ? 1 : Math.min(1, cur.elapsed / cur.runTime);
+          cur.anim.interpolate(alpha);
+        }
+        if (cur.elapsed >= cur.runTime - 1e-12) {
+          if (cur.anim) {
+            cur.anim.finish();
+            for (const m of cur.anim.getMobjectsToIntroduce?.() ?? []) this.add(m);
+            for (const m of cur.anim.getMobjectsToRemove?.() ?? []) this.remove(m);
+          }
+          task.current = null;
+        }
+      }
+    }
+    // Drop finished tasks so a long render doesn't accumulate dead entries.
+    this._tasks = this._tasks.filter((t) => !t.done);
   }
 
   // Add mobjects and show them for a moment (manim's self.add + a frame).

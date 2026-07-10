@@ -37,6 +37,15 @@
   a hole in the group, not the scene). `colorAdjust` gains `grayscale`
   (canvas filter + SVG feColorMatrix), and blur/grayscale lerp through
   lerpEffects so `Transform`/`animate` tween them.
+- **Flow & timing (MC2)**: `scene.waitUntil(name, fallback=1)` named time
+  events with `SceneConfig.timeEvents` duration overrides (the editor-less
+  equivalent of MC's draggable events — retime a scene without touching
+  construct(); starts recorded in `scene.timeEventRecords`).
+  `scene.spawn(generator)` BACKGROUND tasks: yield Animations (or numbers
+  to idle) and they advance in lockstep with the foreground play()/wait()
+  clock — fully deterministic; `TaskHandle.cancel()`/`.join()` (join emits
+  frames until the task completes), `scene.loopForever(factory)` for MC's
+  infinite loops (Repeat stays finite by design).
 
 ## 0.2.0 — 2026-07-10
 

@@ -133,6 +133,7 @@ export { CanvasRenderer, Camera } from "./renderer/CanvasRenderer.ts";
 export { SVGRenderer, mobjectsToSVG } from "./renderer/SVGRenderer.ts";
 export type { SVGRenderOptions } from "./renderer/SVGRenderer.ts";
 export { Scene } from "./scene/Scene.ts";
+export type { TaskHandle } from "./scene/Scene.ts";
 export { isSceneLike, makeScene, runConstruct, sampleSceneAt } from "./scene/orchestrate.ts";
 
 export {
