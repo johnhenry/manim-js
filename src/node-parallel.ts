@@ -184,7 +184,10 @@ export async function renderSegmentRange(
   camera.pixelWidth = r.pixelWidth;
   camera.pixelHeight = r.pixelHeight;
   if (!camera.background) camera.background = r.background;
-  const renderer = new CanvasRenderer(ctx, camera);
+  // Same factory threading as node.ts -- workers must render effects (and
+  // cacheStatic offscreens) identically to the sequential path, or a
+  // parallel render's partials would differ from sequential ones.
+  const renderer = new CanvasRenderer(ctx, camera, { createCanvas: (w, h) => createCanvas(w, h) });
 
   // See Scene.ts's computeRenderConfigHash() doc comment. Must use the exact
   // same salt as node.ts's sequential path (and this file's own renderParallel()

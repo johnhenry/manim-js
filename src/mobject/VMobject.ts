@@ -6,6 +6,7 @@
 import { Mobject } from "./Mobject.ts";
 import type { MobjectConfig } from "./Mobject.ts";
 import { Color } from "../core/color.ts";
+import { lerpEffects } from "../core/effects.ts";
 import * as V from "../core/math/vector.ts";
 import {
   bezier,
@@ -790,6 +791,9 @@ export class VMobject extends Mobject {
     this.fillOpacity = start.fillOpacity + (target.fillOpacity - start.fillOpacity) * alpha;
     this.strokeOpacity = start.strokeOpacity + (target.strokeOpacity - start.strokeOpacity) * alpha;
     this.strokeWidth = start.strokeWidth + (target.strokeWidth - start.strokeWidth) * alpha;
+    if (start.effects || target.effects) {
+      this.effects = lerpEffects(start.effects, target.effects, alpha);
+    }
     const sn = Math.min(this.submobjects.length, start.submobjects.length, target.submobjects.length);
     for (let i = 0; i < sn; i++) this.submobjects[i].interpolate(start.submobjects[i], target.submobjects[i], alpha);
     return this;

@@ -5,6 +5,7 @@
 import { partialBezier, bezier } from "../core/math/bezier.ts";
 import { ZBuffer } from "./zbuffer.ts";
 import { Color } from "../core/color.ts";
+import { splitEffects, effectsToCanvasFilter, effectPad, makeNoiseBytes } from "../core/effects.ts";
 import type { Vec3, Ctx2D, ColorLike } from "../core/types.ts";
 import type { Mobject } from "../mobject/Mobject.ts";
 
@@ -143,15 +144,33 @@ export interface Camera {
   projectionDepth?(p: number[]): number;
 }
 
+export interface CanvasRendererOptions {
+  /** Synchronous offscreen-canvas factory. Browsers don't need this
+   *  (OffscreenCanvas / a detached <canvas> is used automatically); Node
+   *  callers pass @napi-rs/canvas's createCanvas here -- it can only be
+   *  reached via an async import, so the renderer can't fetch it itself.
+   *  Enables the effects pipeline's offscreen compositing and makes
+   *  cacheStatic() work under Node. */
+  createCanvas?: (w: number, h: number) => any;
+}
+
 export class CanvasRenderer {
   ctx: Ctx2D;
   camera: Camera;
   _zb?: ZBuffer;
   private _staticCache = new WeakMap<any, StaticCacheEntry>();
+  private _createCanvas?: (w: number, h: number) => any;
+  // Deterministic noise-effect tile canvases, keyed by `${seed}|${mono}`.
+  private _noiseTiles = new Map<string, any>();
 
-  constructor(ctx: Ctx2D, camera: Camera) {
+  constructor(ctx: Ctx2D, camera: Camera, opts: CanvasRendererOptions = {}) {
     this.ctx = ctx;
     this.camera = camera;
+    this._createCanvas = opts.createCanvas;
+  }
+
+  private _makeOffscreen(w: number, h: number): any {
+    return this._createCanvas?.(w, h) ?? makeSyncOffscreenCanvas(w, h);
   }
 
   clear(): void {
@@ -342,23 +361,28 @@ export class CanvasRenderer {
     // Draw in z-index order, stable for equal z. With a 3D camera, break ties by
     // painter's depth (far faces first) so surfaces self-occlude correctly.
     const camera3d = typeof this.camera.projectionDepth === "function" ? this.camera : null;
-    const flat: Array<{ mob: any; z: number; depth: number; seq: number }> = [];
+    const flat: Array<{ mob: any; z: number; depth: number; seq: number; effects?: any[] }> = [];
     let seq = 0;
-    const collect = (m: any, inheritedZ: number) => {
+    const collect = (m: any, inheritedZ: number, inheritedEffects?: any[]) => {
       const z = m.zIndex ?? inheritedZ;
+      // A container's own effects propagate to its leaves (like zIndex) --
+      // effects are applied PER LEAF, one offscreen composite each; subtree-
+      // level compositing (blur the whole group as one image) is future work.
+      const effects = m.effects?.length ? m.effects : inheritedEffects;
       // Mesh3D is GPU-only (see renderScene3D()'s equivalent skip above) --
       // its `points` is just a bounding-box proxy, not real geometry.
       if (!m._isMesh3D && m.points && m.points.length) {
         const depth = camera3d ? camera3d.projectionDepth!(centroid(m.points)) : 0;
-        flat.push({ mob: m, z, depth, seq: seq++ });
+        flat.push({ mob: m, z, depth, seq: seq++, effects });
       }
-      for (const s of m.submobjects) collect(s, z);
+      for (const s of m.submobjects) collect(s, z, effects);
     };
-    for (const m of mobjects) collect(m, 0);
+    for (const m of mobjects) collect(m, 0, undefined);
     // Ascending depth = far -> near (nearer draws last, on top).
     flat.sort((a, b) => (a.z - b.z) || (a.depth - b.depth) || (a.seq - b.seq));
-    for (const { mob } of flat) {
-      if (mob._isText) this.drawText(mob);
+    for (const { mob, effects } of flat) {
+      if (effects?.length) this._drawWithEffects(mob, effects);
+      else if (mob._isText) this.drawText(mob);
       else if (mob._isImage) this.drawImage(mob);
       else if (mob._cacheStatic) this._drawCachedVMobject(mob);
       else this.drawVMobject(mob);
@@ -414,12 +438,48 @@ export class CanvasRenderer {
     return { minX, minY, maxX, maxY };
   }
 
-  private _drawCachedVMobject(mob: any): void {
+  // Render a single mobject into a freshly-made offscreen canvas sized to its
+  // padded pixel bounding box, translating the camera so the mobject lands at
+  // the offscreen's origin. Returns null when the bbox is degenerate or no
+  // offscreen backend exists. Shared by the static-subtree cache and the
+  // effects compositor -- the ctx-swap + toPixel-override discipline lives in
+  // exactly one place.
+  private _renderToOffscreen(mob: any, pad: number): { canvas: any; minX: number; minY: number } | null {
     const bbox = this._pixelBBox(mob);
-    if (!isFinite(bbox.minX)) return;
+    if (!isFinite(bbox.minX)) return null;
+    const minX = Math.floor(bbox.minX) - pad;
+    const minY = Math.floor(bbox.minY) - pad;
+    const w = Math.max(1, Math.ceil(bbox.maxX - bbox.minX) + pad * 2);
+    const h = Math.max(1, Math.ceil(bbox.maxY - bbox.minY) + pad * 2);
+
+    const canvas = this._makeOffscreen(w, h);
+    if (!canvas) return null;
+    const offCtx = canvas.getContext("2d");
+
+    const savedCtx = this.ctx;
+    const savedToPixel = this.camera.toPixel;
+    (this.camera as any).toPixel = (p: number[]): [number, number] => {
+      const [x, y] = savedToPixel.call(this.camera, p);
+      return [x - minX, y - minY];
+    };
+    this.ctx = offCtx;
+    try {
+      if (mob._isText) this.drawText(mob);
+      else if (mob._isImage) this.drawImage(mob);
+      else this.drawVMobject(mob);
+    } finally {
+      this.ctx = savedCtx;
+      (this.camera as any).toPixel = savedToPixel;
+    }
+    return { canvas, minX, minY };
+  }
+
+  private _drawCachedVMobject(mob: any): void {
     // Pad by the stroke width so a wide stroke isn't clipped at the shape's
     // raw point bounding box.
     const pad = Math.ceil(((mob.strokeWidth ?? 0) + (mob.backgroundStrokeWidth ?? 0)) * this.camera.strokeScale()) + 2;
+    const bbox = this._pixelBBox(mob);
+    if (!isFinite(bbox.minX)) return;
     const minX = Math.floor(bbox.minX) - pad;
     const minY = Math.floor(bbox.minY) - pad;
     const w = Math.max(1, Math.ceil(bbox.maxX - bbox.minX) + pad * 2);
@@ -433,31 +493,122 @@ export class CanvasRenderer {
       return;
     }
 
-    const canvas = makeSyncOffscreenCanvas(w, h);
-    if (!canvas) {
-      // No synchronous offscreen-canvas backend available (Node, no DOM) --
-      // fall back to drawing directly; caching is a no-op here.
+    const off = this._renderToOffscreen(mob, pad);
+    if (!off) {
+      // No synchronous offscreen-canvas backend available -- fall back to
+      // drawing directly; caching is a no-op here.
       this.drawVMobject(mob);
       return;
     }
-    const offCtx = canvas.getContext("2d");
 
-    const savedCtx = this.ctx;
-    const savedToPixel = this.camera.toPixel;
-    (this.camera as any).toPixel = (p: number[]): [number, number] => {
-      const [x, y] = savedToPixel.call(this.camera, p);
-      return [x - minX, y - minY];
-    };
-    this.ctx = offCtx;
-    try {
-      this.drawVMobject(mob);
-    } finally {
-      this.ctx = savedCtx;
-      (this.camera as any).toPixel = savedToPixel;
+    this._staticCache.set(mob, {
+      canvas: off.canvas, ctx: off.canvas.getContext("2d"),
+      fingerprint, cameraFingerprint, w, h,
+    });
+    this.ctx.drawImage(off.canvas, off.minX, off.minY);
+  }
+
+  // --- effects compositor (src/core/effects.ts) -----------------------------
+  // Renders the mobject to a padded offscreen, then composites back with ONE
+  // filtered drawImage: blur/colorAdjust as their CSS filter functions, glow
+  // as N chained drop-shadow(0 0 r color) entries (the standard CSS glow
+  // technique), drop shadow as a final drop-shadow(). Everything rides
+  // ctx.filter rather than the shadow* context properties DELIBERATELY:
+  // @napi-rs/canvas (Skia) ignores shadow* on drawImage entirely (verified
+  // empirically), while filter drop-shadow() applies to drawImage in both
+  // Skia and browsers -- filter is the only mechanism that behaves
+  // identically across backends. Noise is a separate alpha-clipped pass.
+  private _buildEffectFilter(mob: any, plan: ReturnType<typeof splitEffects>, scale: number): string {
+    let filter = effectsToCanvasFilter(plan.filter, scale);
+    if (plan.glow) {
+      const strength = Math.max(1, Math.min(4, Math.round(plan.glow.strength ?? 2)));
+      const glowColor = Color.parse(
+        plan.glow.color ?? mob.strokeColor ?? mob.fillColor ?? "#ffffff",
+      ).toRGBAString(1);
+      const r = plan.glow.radius * scale;
+      for (let i = 0; i < strength; i++) filter += ` drop-shadow(0px 0px ${r}px ${glowColor})`;
+    }
+    if (plan.shadow) {
+      const shadowColor = Color.parse(plan.shadow.color ?? "#000000").toRGBAString(1);
+      const ox = (plan.shadow.offsetX ?? 0) * scale;
+      const oy = (plan.shadow.offsetY ?? 0) * scale;
+      filter += ` drop-shadow(${ox}px ${oy}px ${plan.shadow.blur * scale}px ${shadowColor})`;
+    }
+    return filter.trim();
+  }
+
+  private _drawWithEffects(mob: any, effects: any[] = mob.effects): void {
+    const scale = this.camera.strokeScale();
+    const plan = splitEffects(effects);
+    const filterStr = this._buildEffectFilter(mob, plan, scale);
+    const strokePad = Math.ceil(((mob.strokeWidth ?? 0) + (mob.backgroundStrokeWidth ?? 0)) * scale) + 2;
+    const pad = effectPad(effects, scale) + strokePad;
+
+    const off = this._renderToOffscreen(mob, pad);
+    const { ctx } = this;
+
+    if (!off) {
+      // Degraded direct-ctx path (no offscreen backend): the same filter
+      // string applies per fill/stroke op rather than to the composed
+      // result; noise is skipped.
+      ctx.save();
+      try {
+        if (filterStr) (ctx as any).filter = filterStr;
+        if (mob._isText) this.drawText(mob);
+        else if (mob._isImage) this.drawImage(mob);
+        else this.drawVMobject(mob);
+      } finally {
+        ctx.restore();
+      }
+      return;
     }
 
-    this._staticCache.set(mob, { canvas, ctx: offCtx, fingerprint, cameraFingerprint, w, h });
-    this.ctx.drawImage(canvas, minX, minY);
+    const { canvas, minX, minY } = off;
+    const w = canvas.width, h = canvas.height;
+
+    // Single composite: filter carries blur/colorAdjust/glow/shadow at once.
+    ctx.save();
+    if (filterStr) (ctx as any).filter = filterStr;
+    ctx.drawImage(canvas, minX, minY);
+    ctx.restore();
+
+    // Noise: seeded tile clipped to the source's alpha (source-in on a
+    // scratch canvas), composited over the main draw at `amount` opacity --
+    // opacity-preserving grain, deterministic per seed.
+    if (plan.noise && plan.noise.amount > 0) {
+      const scratch = this._makeOffscreen(w, h);
+      const tile = this._noiseTile(plan.noise.seed ?? 0, plan.noise.monochrome ?? true);
+      if (scratch && tile) {
+        const sctx = scratch.getContext("2d");
+        sctx.drawImage(canvas, 0, 0);
+        sctx.globalCompositeOperation = "source-in";
+        for (let ty = 0; ty < h; ty += tile.height) {
+          for (let tx = 0; tx < w; tx += tile.width) {
+            sctx.drawImage(tile, tx, ty);
+          }
+        }
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, plan.noise.amount));
+        ctx.drawImage(scratch, minX, minY);
+        ctx.restore();
+      }
+    }
+  }
+
+  // Deterministic noise tile canvas (128px), cached per (seed, mono).
+  private _noiseTile(seed: number, mono: boolean): any {
+    const key = `${seed}|${mono}`;
+    let tile = this._noiseTiles.get(key);
+    if (tile) return tile;
+    const SIZE = 128;
+    tile = this._makeOffscreen(SIZE, SIZE);
+    if (!tile) return null;
+    const tctx = tile.getContext("2d");
+    const img = tctx.createImageData(SIZE, SIZE);
+    img.data.set(makeNoiseBytes(SIZE, seed, mono));
+    tctx.putImageData(img, 0, 0);
+    this._noiseTiles.set(key, tile);
+    return tile;
   }
 
   // Draw a raster ImageMobject into the pixel bounding box of its projected

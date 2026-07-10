@@ -206,7 +206,10 @@ export async function render(sceneOrConstruct: any, options: RenderOptions = {})
   camera.pixelWidth = pixelWidth;
   camera.pixelHeight = pixelHeight;
   if (!camera.background) camera.background = background;
-  const renderer = new CanvasRenderer(ctx, camera);
+  // The createCanvas factory enables the effects pipeline's offscreen
+  // compositing and cacheStatic() under Node (the renderer can't reach
+  // @napi-rs/canvas itself -- it's only available via this file's async import).
+  const renderer = new CanvasRenderer(ctx, camera, { createCanvas: (w, h) => createCanvas(w, h) });
 
   // See Scene.ts's computeRenderConfigHash() doc comment: the partial-segment
   // cache key needs this salt, or a render-config change (background,

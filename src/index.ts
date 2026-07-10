@@ -13,6 +13,15 @@ export {
 export * from "./core/color.ts";
 export * as colors from "./core/color.ts";
 
+// Visual effects model (per-mobject blur/glow/shadow/colorAdjust/noise +
+// camera-level FrameEffect grading). Fluent API lives on Mobject itself
+// (mob.blur(4).glow(8)); these are the descriptors + pure helpers.
+export {
+  effectsToCanvasFilter, effectPad, effectsFingerprint, splitEffects,
+  makeNoiseBytes, saturateMatrix, hueRotateMatrix, lerpEffects,
+} from "./core/effects.ts";
+export type { Effect, FrameEffect } from "./core/effects.ts";
+
 // Constants (buffers, axes, screen edges, enums, defaults). PI/TAU/DEGREES come
 // from vector.ts above, so exclude them here to avoid a duplicate export.
 export {

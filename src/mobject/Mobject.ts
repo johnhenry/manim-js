@@ -5,6 +5,8 @@ import * as V from "../core/math/vector.ts";
 import { Color } from "../core/color.ts";
 import { makeAnimateBuilder } from "../animation/composition.ts";
 import { copyMemberwiseStyle } from "./copy_style.ts";
+import { lerpEffects } from "../core/effects.ts";
+import type { Effect } from "../core/effects.ts";
 import type { Vec3, ColorLike } from "../core/types.ts";
 
 let _idCounter = 0;
@@ -47,6 +49,10 @@ export class Mobject {
    *  (set via cacheStatic()). Mainly helps static-camera scenes with many
    *  unchanging elements (dense axis labels, background grids). */
   _cacheStatic?: boolean;
+  /** Visual effects (blur/glow/shadow/colorAdjust/noise) applied by the
+   *  renderer at draw time -- see the fluent helpers in the style section
+   *  below and src/core/effects.ts for renderer support notes. */
+  effects?: Effect[];
 
   constructor(config: MobjectConfig = {}) {
     this.id = _idCounter++;
@@ -265,6 +271,45 @@ export class Mobject {
 
   fade(darkness = 0.5): this {
     return this.setOpacity(this.opacity * (1 - darkness));
+  }
+
+  // --- visual effects (src/core/effects.ts) --------------------------------
+  // Renderer support varies: CanvasRenderer applies these per-mobject via an
+  // offscreen composite (2D path; in 3D scenes only overlay text/images and
+  // fixed-in-frame mobjects -- z-buffered solid geometry is skipped);
+  // SVGRenderer emits native <filter> defs; ThreeRenderer ignores them (use
+  // its post-processing pipeline instead). See docs/renderers.md.
+  addEffect(...effects: Effect[]): this {
+    (this.effects ??= []).push(...effects);
+    return this;
+  }
+
+  clearEffects(): this {
+    this.effects = undefined;
+    return this;
+  }
+
+  blur(radius: number): this {
+    return this.addEffect({ type: "blur", radius });
+  }
+
+  glow(radius: number, color?: ColorLike, strength?: number): this {
+    return this.addEffect({ type: "glow", radius, color, strength });
+  }
+
+  dropShadow(opts: { blur?: number; color?: ColorLike; offsetX?: number; offsetY?: number } = {}): this {
+    return this.addEffect({
+      type: "shadow", blur: opts.blur ?? 8, color: opts.color,
+      offsetX: opts.offsetX, offsetY: opts.offsetY,
+    });
+  }
+
+  colorAdjust(opts: { brightness?: number; contrast?: number; saturate?: number; hueRotate?: number }): this {
+    return this.addEffect({ type: "colorAdjust", ...opts });
+  }
+
+  noise(amount: number, opts: { monochrome?: boolean; seed?: number } = {}): this {
+    return this.addEffect({ type: "noise", amount, ...opts });
   }
 
   // Ergonomic animation builder: `scene.play(mob.animate.shift(RIGHT).scale(2))`.
@@ -754,6 +799,10 @@ export class Mobject {
     c._color = Color.parse(this.color);
     c.updaters = [];
     c.submobjects = this.submobjects.map((m) => m.copy());
+    // Object.assign copies the effects ARRAY by reference -- deep-clone so a
+    // later mutation on the copy (e.g. animating a blur radius) can't
+    // retroactively change the original.
+    if (this.effects) c.effects = this.effects.map((e: Effect) => ({ ...e }));
     return c;
   }
 
@@ -766,6 +815,9 @@ export class Mobject {
     }
     this._color = Color.lerp(start.color, target.color, alpha);
     this.opacity = start.opacity + (target.opacity - start.opacity) * alpha;
+    if (start.effects || target.effects) {
+      this.effects = lerpEffects(start.effects, target.effects, alpha);
+    }
     const sn = Math.min(this.submobjects.length, start.submobjects.length, target.submobjects.length);
     for (let i = 0; i < sn; i++) {
       this.submobjects[i].interpolate(start.submobjects[i], target.submobjects[i], alpha);
