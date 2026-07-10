@@ -264,6 +264,28 @@ export class Scene {
     return this;
   }
 
+  /** Advance exactly ONE frame (Motion Canvas's bare `yield`): emits a
+   *  frame and moves the clock by 1/fps. */
+  async nextFrame(): Promise<void> {
+    await this.wait(1 / this.fps);
+  }
+
+  /** Motion-Canvas-style logger handle (their `useLogger()`): levels route
+   *  through the scene's onLog hook (no-op unless wired) AND the console
+   *  for warn/error, so ports keep their shape. */
+  get logger(): { debug: (m: any) => void; info: (m: any) => void; warn: (m: any) => void; error: (m: any) => void } {
+    const route = (level: string, consoleToo: boolean) => (msg: any) => {
+      this.log(level, typeof msg === "string" ? msg : JSON.stringify(msg));
+      if (consoleToo) (console as any)[level === "warn" ? "warn" : "error"](msg);
+    };
+    return {
+      debug: route("debug", false),
+      info: route("info", false),
+      warn: route("warn", true),
+      error: route("error", true),
+    };
+  }
+
   /** manim parity (add_foreground_mobject(s)): keep these drawn LAST, above
    *  everything later add()s introduce. */
   addForegroundMobject(...mobs: (Mobject | Mobject[])[]): this {

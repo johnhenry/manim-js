@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Motion-Canvas-style tween ergonomics (MC1)**: `tweenTo(mob, {x: 300},
+  1).to({x: -300}, 1).wait(0.5).back(1)` chainable property tweens
+  (position/rotation/scale/fill/opacity/size/strokeEnd...), tweenable
+  signals (`tweenSignal(radius, 2, 1.5)` — computed dependents follow),
+  imperative `tween(duration, cb)` + `map(from, to, t)`, spring PRESETS
+  (PlopSpring/SmoothSpring/BounceSpring/SwingSpring/JumpSpring/
+  StrikeSpring) with `springTween(preset, from, to, cb)`,
+  `useRandom(seed)` (nextInt/nextFloat/intArray/floatArray/gauss over
+  mulberry32), `Scene.nextFrame()` single-frame step, and
+  `Scene.logger` (debug/info/warn/error → onLog).
+
 ## 0.2.0 — 2026-07-10
 
 ### Added

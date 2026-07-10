@@ -192,6 +192,12 @@ export { Repeat } from "./animation/repeat.ts";
 export type { RepeatConfig } from "./animation/repeat.ts";
 // Composable stagger value-transform helpers (cycle()/staggerRange()).
 export { cycle, staggerRange } from "./animation/stagger.ts";
+// Motion-Canvas-style tween ergonomics (chainable tweens, spring presets, seeded RNG).
+export {
+  tweenTo, tweenSignal, tween, map, TweenChain, springTween, useRandom,
+  PlopSpring, SmoothSpring, BounceSpring, SwingSpring, JumpSpring, StrikeSpring,
+} from "./animation/tween_chain.ts";
+export type { SeededRandom, Ease } from "./animation/tween_chain.ts";
 // Unified keyframe-track primitive (structured/mutable, unlike opaque RateFuncs).
 export { KeyframeTrack, PlayKeyframeTrack, animateSignal } from "./animation/keyframe_track.ts";
 export type { Keyframe, KeyframeTrackOptions } from "./animation/keyframe_track.ts";
