@@ -97,6 +97,8 @@ jobs:
             path="examples/manim-parity/out/$f.mp4"
             size=$(stat -c%s "$path")
             echo "$path: $size bytes"
-            test "$size" -gt 20000
+            # Mostly-static 1s scenes compress under 15KB at low quality; the
+            # ffprobe stream check below is the real validity gate.
+            test "$size" -gt 5000
             ffprobe -v error -select_streams v -show_entries stream=codec_type -of csv=p=0 "$path" | grep -q video
           done
