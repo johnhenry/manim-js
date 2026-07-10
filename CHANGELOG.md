@@ -46,6 +46,17 @@
   clock — fully deterministic; `TaskHandle.cancel()`/`.join()` (join emits
   frames until the task completes), `scene.loopForever(factory)` for MC's
   infinite loops (Repeat stays finite by design).
+- **Code editing API (MC3)**: `code.edit(0.8)\`const x = ${edit("1",
+  "2")};${insert(" // two")}\`` — MC's tagged-template code edits with
+  `insert()`/`remove()`/`edit()` markers, returning a diffTo-based
+  animation + the resulting Code (top-left anchored).
+  `code.selection(lines(1, 3))` / `word(line, col, len)` /
+  `code.findFirstRange(pattern)` highlight ranges by dimming everything
+  else (pass `null` to clear; chained selections hand off smoothly).
+  Instant mutators `code.setCode()`, `code.replace(range, text)` (still
+  dispatches to manim's replace-onto-mobject for Mobject args),
+  `code.prepend()`, `code.append()` — identity-preserving in-place
+  rebuilds, top-left anchored.
 
 ## 0.2.0 — 2026-07-10
 

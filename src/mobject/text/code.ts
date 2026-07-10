@@ -9,7 +9,8 @@ import { Text } from "./Text.ts";
 import type { TextConfig } from "./Text.ts";
 import { Rectangle, Dot } from "../geometry.ts";
 import * as V from "../../core/math/vector.ts";
-import { Transform } from "../../animation/Animation.ts";
+import { Transform, Animation } from "../../animation/Animation.ts";
+import type { AnimationConfig } from "../../animation/Animation.ts";
 import { AnimationGroup } from "../../animation/composition.ts";
 import { TransformMatchingAuto } from "../../animation/auto_matching.ts";
 import type { AutoMatchingConfig } from "../../animation/auto_matching.ts";
@@ -131,6 +132,83 @@ function tokenizeLine(line: string, lang: string, style: Record<string, string>)
   return toks;
 }
 
+// --- Motion Canvas parity (MC3): ranges, selection, tagged-template edits ---
+
+/** A half-open-ish source range in EXPANDED (tab -> spaces) coordinates:
+ *  lines are 0-based, cols count characters; end is inclusive of the line,
+ *  exclusive of endCol. */
+export interface CodeRange {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+}
+
+/** Whole-line range: `lines(2)` = line 2, `lines(1, 3)` = lines 1-3
+ *  (0-based, inclusive) — MC's `lines()` selection helper. */
+export function lines(from: number, to?: number): CodeRange {
+  return { startLine: from, startCol: 0, endLine: to ?? from, endCol: Infinity };
+}
+
+/** Single-word range at (line, col) spanning `length` chars (MC's `word()`). */
+export function word(line: number, col: number, length = Infinity): CodeRange {
+  return { startLine: line, startCol: col, endLine: line, endCol: col + length };
+}
+
+type CodeEditMarker =
+  | { __codeEdit: "insert"; text: string }
+  | { __codeEdit: "remove"; text: string }
+  | { __codeEdit: "edit"; from: string; to: string };
+
+/** Marks text ADDED by a `code.edit` template (absent before, present after). */
+export function insert(text: string): CodeEditMarker {
+  return { __codeEdit: "insert", text };
+}
+
+/** Marks text REMOVED by a `code.edit` template (present before, absent after). */
+export function remove(text: string): CodeEditMarker {
+  return { __codeEdit: "remove", text };
+}
+
+/** Marks text REPLACED by a `code.edit` template (`from` before, `to` after). */
+export function edit(from: string, to: string): CodeEditMarker {
+  return { __codeEdit: "edit", from, to };
+}
+
+/** Result of `code.edit(...)`: play `animation`, then keep using `target`
+ *  (same contract as `matchTex`). */
+export interface CodeEditResult {
+  animation: AnimationGroup;
+  target: Code;
+}
+
+// Lerp every code token's opacity toward a per-token target (1 selected,
+// dimmed otherwise). One animation for the whole token set -- begin()
+// captures live start opacities so chained selections hand off smoothly.
+class CodeSelectionAnimation extends Animation {
+  private _targets: number[];
+  private _starts: number[] = [];
+
+  constructor(tokens: VGroup, targets: number[], config: AnimationConfig = {}) {
+    super(tokens, config);
+    this._targets = targets;
+    if (config.runTime == null) this.runTime = 0.3;
+  }
+
+  begin(): this {
+    this._starts = this.mobject.submobjects.map((t: any) => t.opacity ?? 1);
+    return super.begin();
+  }
+
+  interpolateMobject(alpha: number): void {
+    const toks = this.mobject.submobjects;
+    for (let i = 0; i < toks.length; i++) {
+      const start = this._starts[i] ?? 1;
+      toks[i].setOpacity(start + (this._targets[i] - start) * alpha);
+    }
+  }
+}
+
 export class Code extends VGroup {
   codeString: string;
   language: string;
@@ -146,6 +224,9 @@ export class Code extends VGroup {
   // tokens (autoKey() alone would otherwise match every "x" on a line to
   // the same key, since it falls back to matching by .text).
   private _tokenLoc: Array<{ line: number; col: number }> = [];
+  // Construction config retained so edit()/replace()/setCode() can rebuild
+  // an identically-styled Code.
+  private _config: CodeConfig = {};
 
   constructor(codeOrConfig: string | CodeConfig = "", config: CodeConfig = {}) {
     super();
@@ -159,6 +240,7 @@ export class Code extends VGroup {
       code = String(codeOrConfig);
     }
 
+    this._config = { ...config };
     this.language = normalizeLang(config.language);
     this.tabWidth = config.tabWidth ?? 4;
     this.showLineNumbers = config.lineNumbers ?? true;
@@ -308,5 +390,180 @@ export class Code extends VGroup {
     const tokenAnims = new TransformMatchingAuto(this.codeTokens, other.codeTokens, config).animations;
     const bg = new Transform(this.background, other.background);
     return new AnimationGroup([...tokenAnims, bg]);
+  }
+
+  // --- MC3: tagged-template edits -----------------------------------------
+
+  /** The source with tabs expanded — the coordinate space CodeRange,
+   *  findFirstRange() and replace() all use. */
+  expandedCode(): string {
+    return this.codeString.replace(/\t/g, " ".repeat(this.tabWidth));
+  }
+
+  /**
+   * Motion Canvas's `code().edit(duration)\`...\`` as a tagged template:
+   * plain template text is unchanged, `${insert(x)}` appears only after,
+   * `${remove(y)}` only before, `${edit(a, b)}` swaps a -> b. Returns the
+   * diffTo-based animation plus the resulting Code (anchored at this
+   * Code's top-left):
+   *
+   * ```ts
+   * const { animation, target } = code.edit(0.8)\`const x = \${edit("1", "2")};\`;
+   * await scene.play(animation);
+   * ```
+   */
+  edit(duration = 1): (strings: TemplateStringsArray, ...subs: Array<CodeEditMarker | string>) => CodeEditResult {
+    return (strings, ...subs) => {
+      let before = "";
+      let after = "";
+      for (let i = 0; i < strings.length; i++) {
+        before += strings[i];
+        after += strings[i];
+        const sub = subs[i];
+        if (sub == null) continue;
+        if (typeof sub === "string") {
+          before += sub;
+          after += sub;
+        } else if (sub.__codeEdit === "insert") {
+          after += sub.text;
+        } else if (sub.__codeEdit === "remove") {
+          before += sub.text;
+        } else if (sub.__codeEdit === "edit") {
+          before += sub.from;
+          after += sub.to;
+        }
+      }
+      const target = new Code(after, { ...this._config });
+      // Anchor the result where this code sits (top-left, like an editor).
+      const myUL = this.getCorner(V.UL);
+      const itsUL = target.getCorner(V.UL);
+      target.shift(V.sub(myUL, itsUL));
+      const animation = this.diffTo(target);
+      animation.runTime = duration;
+      return { animation, target, before } as CodeEditResult & { before: string };
+    };
+  }
+
+  // --- MC3: selection ------------------------------------------------------
+
+  private _tokenInRange(i: number, r: CodeRange): boolean {
+    const loc = this._tokenLoc[i];
+    if (!loc) return false;
+    if (loc.line < r.startLine || loc.line > r.endLine) return false;
+    const text = (this.codeTokens.submobjects[i] as any).text ?? "";
+    const tokStart = loc.col;
+    const tokEnd = loc.col + Math.max(1, text.length);
+    const from = loc.line === r.startLine ? r.startCol : 0;
+    const to = loc.line === r.endLine ? r.endCol : Infinity;
+    return tokEnd > from && tokStart < to;
+  }
+
+  /**
+   * Highlight a range (or ranges) by dimming everything else — MC's
+   * `code.selection(lines(5, 8), 0.3)`. Pass `null` to clear (everything
+   * back to full opacity). Returns an Animation to play():
+   *
+   * ```ts
+   * await scene.play(code.selection(lines(1, 2)));
+   * await scene.play(code.selection(code.findFirstRange("return")!));
+   * await scene.play(code.selection(null)); // reset
+   * ```
+   */
+  selection(
+    sel: CodeRange | CodeRange[] | null,
+    duration = 0.3,
+    config: AnimationConfig & { dimOpacity?: number } = {},
+  ): Animation {
+    const dim = config.dimOpacity ?? 0.25;
+    const ranges = sel == null ? null : Array.isArray(sel) ? sel : [sel];
+    const targets = this.codeTokens.submobjects.map((_t, i) => {
+      if (ranges == null) return 1;
+      return ranges.some((r) => this._tokenInRange(i, r)) ? 1 : dim;
+    });
+    const anim = new CodeSelectionAnimation(this.codeTokens, targets, config);
+    anim.runTime = config.runTime ?? duration;
+    return anim;
+  }
+
+  /** First occurrence of `pattern` (string or RegExp) in the expanded
+   *  source, as a CodeRange — MC's `findFirstRange()`. Null if absent. */
+  findFirstRange(pattern: string | RegExp): CodeRange | null {
+    const src = this.expandedCode();
+    let start = -1, length = 0;
+    if (typeof pattern === "string") {
+      start = src.indexOf(pattern);
+      length = pattern.length;
+    } else {
+      const m = pattern.exec(src);
+      if (m) { start = m.index; length = m[0].length; }
+    }
+    if (start < 0) return null;
+    const toLineCol = (offset: number) => {
+      const pre = src.slice(0, offset);
+      const line = (pre.match(/\n/g) ?? []).length;
+      const col = offset - (pre.lastIndexOf("\n") + 1);
+      return { line, col };
+    };
+    const a = toLineCol(start);
+    const b = toLineCol(start + length);
+    return { startLine: a.line, startCol: a.col, endLine: b.line, endCol: b.col };
+  }
+
+  // --- MC3: instant mutators -----------------------------------------------
+
+  /**
+   * Rebuild this Code IN PLACE around new source (identity-preserving, like
+   * PieChart.setValues): same styling config, background top-left stays
+   * anchored. The instant counterpart of edit() — use inside updaters or
+   * between animations.
+   */
+  setCode(code: string): this {
+    const anchor = this.getCorner(V.UL);
+    const fresh = new Code(code, { ...this._config });
+    fresh.shift(V.sub(anchor, fresh.getCorner(V.UL)));
+    this.submobjects.length = 0;
+    this.points = [];
+    for (const child of fresh.submobjects) this.add(child);
+    this.codeString = fresh.codeString;
+    this.codeLines = fresh.codeLines;
+    this.lineNumbers = fresh.lineNumbers;
+    this.codeTokens = fresh.codeTokens;
+    this.background = fresh.background;
+    (this as any)._tokenLoc = (fresh as any)._tokenLoc;
+    return this;
+  }
+
+  /** Replace `range` (expanded coordinates) with `text`, instantly.
+   *  Also still accepts a Mobject (manim's replace-in-space) — the two
+   *  signatures share a name by dispatch, MC's vs manim's `replace`. */
+  replace(range: CodeRange, text: string): this;
+  replace(other: any, config?: { dimToMatch?: number; stretch?: boolean }): this;
+  replace(rangeOrMobject: any, textOrConfig?: any): this {
+    if (rangeOrMobject == null || typeof rangeOrMobject.startLine !== "number") {
+      return super.replace(rangeOrMobject, textOrConfig);
+    }
+    const range = rangeOrMobject as CodeRange;
+    const text = String(textOrConfig ?? "");
+    const src = this.expandedCode();
+    const lineStarts: number[] = [0];
+    for (let i = 0; i < src.length; i++) if (src[i] === "\n") lineStarts.push(i + 1);
+    const clampCol = (line: number, col: number) => {
+      const startOfLine = lineStarts[Math.min(line, lineStarts.length - 1)] ?? 0;
+      const endOfLine = line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : src.length;
+      return Math.min(startOfLine + Math.max(0, col), endOfLine);
+    };
+    const from = clampCol(range.startLine, range.startCol);
+    const to = clampCol(range.endLine, range.endCol === Infinity ? Number.MAX_SAFE_INTEGER : range.endCol);
+    return this.setCode(src.slice(0, from) + text + src.slice(to));
+  }
+
+  /** Prepend text to the source, instantly (MC's `code.prepend()`). */
+  prepend(text: string): this {
+    return this.setCode(text + this.expandedCode());
+  }
+
+  /** Append text to the source, instantly (MC's `code.append()`). */
+  append(text: string): this {
+    return this.setCode(this.expandedCode() + text);
   }
 }
