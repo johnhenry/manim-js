@@ -65,3 +65,38 @@ jobs:
             test "$size" -gt 50000
             ffprobe -v error -select_streams v -show_entries stream=codec_type -of csv=p=0 "$path" | grep -q video
           done
+
+  manim-smoke:
+    # Three representative manim-gallery ports rendered end-to-end at low
+    # quality: 02 (MathTex + Brace), 16 (axes depth), 25 (3D surface).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      - run: npm ci
+
+      - name: Render manim-parity smoke ports (low quality)
+        env:
+          ECMANIM_DEMO_QUALITY: low
+        run: |
+          node --experimental-strip-types --no-warnings examples/manim-parity/02-BraceAnnotation.ts
+          node --experimental-strip-types --no-warnings examples/manim-parity/16-GraphAreaPlot.ts
+          node --experimental-strip-types --no-warnings examples/manim-parity/25-ThreeDSurfacePlot.ts
+
+      - name: Verify outputs are real videos
+        run: |
+          for f in 02-BraceAnnotation 16-GraphAreaPlot 25-ThreeDSurfacePlot; do
+            path="examples/manim-parity/out/$f.mp4"
+            size=$(stat -c%s "$path")
+            echo "$path: $size bytes"
+            test "$size" -gt 20000
+            ffprobe -v error -select_streams v -show_entries stream=codec_type -of csv=p=0 "$path" | grep -q video
+          done

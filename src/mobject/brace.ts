@@ -22,33 +22,41 @@ export interface BraceConfig {
 }
 
 const DEFAULT_BUFF = 0.2;
-// Height (thickness) of the brace measured perpendicular to its span.
-const BRACE_HEIGHT = 0.3;
+// Depth of the brace measured perpendicular to its span.
+const BRACE_HEIGHT = 0.32;
+// Cubic approximation constant for a quarter arc.
+const K = 0.5523;
 
-// Build a curly-brace outline (a filled VMobject) spanning `width` centered at
-// the origin, opening downward (tip pointing in -y). The shape is two mirrored
-// half-braces meeting at a central downward tip.
-function braceOutline(width: number, height: number, sharpness = 2): number[][] {
+// Build a curly-brace CENTERLINE spanning `width` centered at the origin,
+// opening downward (tip at -height): each half is [end-curl quarter arc] +
+// [straight run] + [quarter arc into the tip]. Stroked, not filled — crisp
+// at any span (the old hand-sketched filled band rendered as a wobble).
+function braceCenterline(vm: VMobject, width: number, height: number): void {
   const w = Math.max(width, 0.01);
   const half = w / 2;
-  const h = height;
-  void sharpness;
-  // Smooth anchor points tracing the top edge left->right with a central dip,
-  // then back along the bottom edge. A thin curly-brace silhouette.
-  const t = h * 0.28; // thickness of the stroke band
-  const anchors: number[][] = [
-    [-half, 0, 0],           // far-left top
-    [-half * 0.5, -h * 0.35, 0],
-    [0, -h, 0],              // central tip (bottom)
-    [half * 0.5, -h * 0.35, 0],
-    [half, 0, 0],            // far-right top
-    [half, t, 0],            // back along the top band, right
-    [half * 0.5, -h * 0.35 + t, 0],
-    [0, -h + t, 0],          // tip band
-    [-half * 0.5, -h * 0.35 + t, 0],
-    [-half, t, 0],           // back to far-left top band
-  ];
-  return anchors;
+  const q = height / 2;
+  const run = Math.max(half - 2 * q, 0); // straight-run half-length
+  vm.points = [];
+  vm.subpathStarts = [];
+
+  const halfPath = (sign: 1 | -1): number[][] => {
+    // From the outer end (sign*half, 0) curling to depth -q, running inward,
+    // then curving down into the tip (0, -2q).
+    const x0 = sign * half;
+    const x1 = sign * (half - q);
+    const x2 = sign * q;
+    return [
+      [x0, 0, 0],
+      // quarter arc: tangent (0,-1) -> (-sign, 0)
+      [x0, -q * K, 0], [x1 + sign * q * K, -q, 0], [x1, -q, 0],
+      // straight run (as a degenerate cubic so the path stays uniform)
+      [x1 - sign * run * 0.33, -q, 0], [x2 + sign * run * 0.33, -q, 0], [x2, -q, 0],
+      // quarter arc into the tip: tangent (-sign, 0) -> (0, -1)
+      [x2 - sign * q * K, -q, 0], [0, -2 * q + q * K, 0], [0, -2 * q, 0],
+    ];
+  };
+  vm.appendBezierPoints(halfPath(-1), true);
+  vm.appendBezierPoints(halfPath(1), true);
 }
 
 export class Brace extends VMobject {
@@ -59,78 +67,56 @@ export class Brace extends VMobject {
 
   constructor(mobject: Mobject | number[][], config: BraceConfig = {}) {
     super({
-      fillOpacity: 1,
-      strokeWidth: 0,
+      fillOpacity: 0,
+      strokeWidth: 4,
+      color: (config as any).color ?? "#FFFFFF",
       ...(config as any),
     });
     this.direction = config.direction ?? V.DOWN;
     this.buff = config.buff ?? DEFAULT_BUFF;
     const sharpness = config.sharpness ?? 2;
-
-    // Determine the extent to span. For a mobject, project its bounding box
-    // onto the axis perpendicular to `direction`.
+    void sharpness;
     const dir = V.normalize(this.direction);
-    // The width axis is perpendicular to the brace direction (in-plane).
-    const widthAxis = [-dir[1], dir[0], 0];
 
-    let box: { min: number[]; max: number[] };
+    // manim's algorithm: rotate the target into the frame where `direction`
+    // is DOWN, take the bounding box THERE (so a diagonal line braced along
+    // its normal hugs the line, not its world-axis bbox), then rotate the
+    // placed brace back. Uses the actual family points, not bbox corners.
+    const targetAngle = V.angleOf(dir);
+    const baseAngle = V.angleOf(V.DOWN); // -pi/2
+    const rot = baseAngle - targetAngle; // world -> brace frame
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const toFrame = (p: number[]): number[] => [p[0] * cos - p[1] * sin, p[0] * sin + p[1] * cos, 0];
+
+    const pts: number[][] = [];
     if (mobject instanceof Mobject) {
-      box = mobject.getBoundingBox();
+      for (const m of mobject.getFamily()) for (const p of (m as any).points ?? []) pts.push(p);
+      if (!pts.length) pts.push(mobject.getCenter());
     } else {
-      // Accept a pair (or list) of points.
-      let min = [Infinity, Infinity, Infinity];
-      let max = [-Infinity, -Infinity, -Infinity];
-      for (const p of mobject as number[][]) {
-        for (let i = 0; i < 3; i++) {
-          if (p[i] < min[i]) min[i] = p[i];
-          if (p[i] > max[i]) max[i] = p[i];
-        }
-      }
-      box = { min, max };
+      for (const p of mobject as number[][]) pts.push(p);
     }
-
-    // Span = projected size of the box along the width axis.
-    const corners = [
-      [box.min[0], box.min[1], 0],
-      [box.max[0], box.min[1], 0],
-      [box.max[0], box.max[1], 0],
-      [box.min[0], box.max[1], 0],
-    ];
-    let lo = Infinity, hi = -Infinity;
-    for (const c of corners) {
-      const proj = V.dot(c, widthAxis);
-      if (proj < lo) lo = proj;
-      if (proj > hi) hi = proj;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity;
+    for (const p of pts) {
+      const [x, y] = toFrame(p);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
     }
-    const span = Math.max(hi - lo, 0.01);
+    const span = Math.max(maxX - minX, 0.01);
     this._span = span;
 
-    // Build the outline (opening in -y), then rotate it so its opening faces
-    // `direction`, and position it just beyond the mobject in that direction.
-    const anchors = braceOutline(span, BRACE_HEIGHT, sharpness);
-    this.setPointsSmoothly([...anchors, anchors[0]]);
+    // Build the centerline in the brace frame: spanning [minX, maxX], top
+    // edge `buff` below the target's lower boundary, tip pointing DOWN.
+    braceCenterline(this, span, BRACE_HEIGHT);
+    const frameCenterX = (minX + maxX) / 2;
+    const frameTopY = minY - this.buff;
+    this.shift([frameCenterX, frameTopY, 0]);
+    const frameTip = [frameCenterX, frameTopY - BRACE_HEIGHT, 0];
 
-    // Rotate from the default DOWN opening to the requested direction.
-    const baseAngle = V.angleOf(V.DOWN); // -pi/2
-    const targetAngle = V.angleOf(dir);
-    this.rotate(targetAngle - baseAngle, { aboutPoint: [0, 0, 0] });
-
-    // Position: the brace's far (flat) edge should sit at the mobject's
-    // boundary in `direction`, offset by buff.
-    const center = mobject instanceof Mobject
-      ? mobject.getCenter()
-      : [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, 0];
-    // Distance from center to the boundary along `direction`.
-    let reach = 0;
-    for (const c of corners) {
-      const proj = V.dot(V.sub(c, center), dir);
-      if (proj > reach) reach = proj;
-    }
-    const braceCenter = V.add(center, V.scale(dir, reach + this.buff + BRACE_HEIGHT / 2));
-    this.moveTo(braceCenter);
-
-    // Record the tip (the pointy middle) for label placement.
-    this._tip = V.add(center, V.scale(dir, reach + this.buff + BRACE_HEIGHT));
+    // Rotate everything back into world space.
+    this.rotate(-rot, { aboutPoint: [0, 0, 0] });
+    const fromFrame = (p: number[]): number[] => [p[0] * cos + p[1] * sin, -p[0] * sin + p[1] * cos, 0];
+    this._tip = fromFrame(frameTip);
 
     if (config.color) this.setColor(config.color);
   }

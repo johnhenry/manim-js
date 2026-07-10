@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **Manim-gallery parity suite** (`examples/manim-parity/`): all 27 examples
+  from docs.manim.community/en/stable/examples.html ported line-for-line,
+  with the Python originals committed beside them (`ref/`) and a README
+  scoring table + porting-convention map. `npm run demos:manim` renders all
+  27; CI renders three end-to-end per push (manim-smoke). Along the way:
+  **Brace rebuilt** (crisp cubic-arc curly geometry + manim's rotate-frame
+  placement — a diagonal brace now hugs its line), **Axes self-centers**
+  like manim (asymmetric ranges used to hang off-screen; axis labels now
+  anchor to live axis geometry; graph golden updated earlier), and
+  **ImageMobject upscales small bitmaps as crisp pixels** (`pixelated`,
+  default for <64px sources).
+
 - **ZoomedScene, for real**: the zoomed display now RENDERS the framed
   region (render-to-region compositing through a derived camera, using the
   effects pipeline's offscreen machinery) instead of being a placeholder

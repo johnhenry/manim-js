@@ -11,6 +11,8 @@ import type { MobjectConfig } from "./Mobject.ts";
 export interface ImageMobjectConfig extends MobjectConfig {
   imageWidth?: number;
   imageHeight?: number;
+  /** Nearest-neighbor upscaling (default: on for bitmaps under 64px). */
+  pixelated?: boolean;
   height?: number;
   width?: number;
   point?: number[];
@@ -20,6 +22,7 @@ export class ImageMobject extends Mobject {
   _isImage: boolean;
   image: any;
   aspect: number;
+  pixelated: boolean;
 
   constructor(image: any, config: ImageMobjectConfig = {}) {
     super(config);
@@ -27,6 +30,9 @@ export class ImageMobject extends Mobject {
     this.image = image;
     const iw = image?.width ?? config.imageWidth ?? 1;
     const ih = image?.height ?? config.imageHeight ?? 1;
+    // Tiny bitmaps (pixel-art / raw arrays) upscale as crisp blocks, like
+    // manim. Override with `pixelated: false` for smooth interpolation.
+    this.pixelated = config.pixelated ?? (iw < 64 && ih < 64);
     this.aspect = ih === 0 ? 1 : iw / ih;
 
     let h = config.height;

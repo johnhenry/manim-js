@@ -69,7 +69,8 @@
     "type-check": "tsc --noEmit",
     "test": "node --test 'test/**/*.test.ts'",
     "example": "node examples/basic.ts",
-    "demos:showcase": "node --experimental-strip-types --no-warnings examples/showcase-parity/_all.ts"
+    "demos:showcase": "node --experimental-strip-types --no-warnings examples/showcase-parity/_all.ts",
+    "demos:manim": "node --experimental-strip-types --no-warnings examples/manim-parity/_all.ts"
   },
   "keywords": [
     "manim",

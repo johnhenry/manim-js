@@ -262,6 +262,13 @@ export class Axes extends VGroup {
     this.yAxis.shift(V.neg(this.yAxis.numberToPoint(this._yRef())));
 
     this.add(this.xAxis, this.yAxis);
+
+    // manim parity: Axes centers ITSELF on screen after construction (its
+    // data origin is wherever the ranges put it). Asymmetric ranges like
+    // xRange [0, 5] used to hang off-screen up-right because the data origin
+    // sat at the world origin. coordsToPoint reads live axis geometry, so
+    // the mapping follows the shift.
+    this.center();
   }
 
   // Data value used as each axis's crossing reference: 0 when it's actually
@@ -473,14 +480,15 @@ export class Axes extends VGroup {
 
   getXAxisLabel(label: any, opts: { direction?: number[]; buff?: number } = {}): VMobject {
     const lbl = this._mkLabel(label);
-    const end: Vec3 = [this._xWorld(this.xRange[1]), 0, 0];
+    // Live geometry (the Axes recenters itself after construction).
+    const end = this.xAxis.axisLine.getEnd();
     lbl.nextTo(end, opts.direction ?? V.UR, opts.buff ?? 0.2);
     return lbl;
   }
 
   getYAxisLabel(label: any, opts: { direction?: number[]; buff?: number } = {}): VMobject {
     const lbl = this._mkLabel(label);
-    const end = [0, this._yWorld(this.yRange[1]), 0];
+    const end = this.yAxis.axisLine.getEnd();
     lbl.nextTo(end, opts.direction ?? V.UR, opts.buff ?? 0.2);
     return lbl;
   }

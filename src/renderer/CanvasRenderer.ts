@@ -809,6 +809,9 @@ export class CanvasRenderer {
     }
     ctx.save();
     ctx.globalAlpha = mob.opacity ?? 1;
+    // manim renders tiny pixel-array images as crisp blocks; honor an
+    // explicit `pixelated` flag (set by ImageMobject for small bitmaps).
+    if (mob.pixelated && "imageSmoothingEnabled" in ctx) ctx.imageSmoothingEnabled = false;
     try {
       ctx.drawImage(mob.image, minx, miny, maxx - minx, maxy - miny);
     } catch { /* unsupported drawable */ }

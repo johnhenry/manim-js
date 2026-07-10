@@ -142,11 +142,15 @@ test("x-axis anchors its own minimum (not an off-segment zero) when xRange doesn
   const xStart = ax.xAxis.axisLine.getStart();
   const yLine = [ax.yAxis.axisLine.getStart(), ax.yAxis.axisLine.getEnd()];
 
-  // The x-axis's own minimum (1.1) must land at the world origin, the same
-  // point the y-axis (whose range DOES straddle 0) crosses at.
-  assert.ok(Math.abs(xStart[0]) < 1e-9 && Math.abs(xStart[1]) < 1e-9, `xAxis start should be at the origin, got ${xStart}`);
-  assert.ok(yLine[0][1] < 0 && yLine[1][1] > 0, "yAxis straddles the origin");
-  assert.ok(Math.abs(yLine[0][0]) < 1e-9 && Math.abs(yLine[1][0]) < 1e-9, "yAxis line sits at world x=0, meeting the xAxis's start");
+  // The x-axis's own minimum (1.1) must land at the CROSSING point -- the
+  // same world point where the y-axis (whose range DOES straddle 0) sits.
+  // (Axes now centers itself on screen like manim, so the crossing is not
+  // necessarily the world origin.)
+  const crossX = yLine[0][0];
+  const crossY = ax.xAxis.axisLine.getStart()[1];
+  assert.ok(Math.abs(xStart[0] - crossX) < 1e-9, `xAxis start meets the yAxis (${xStart[0]} vs ${crossX})`);
+  assert.ok(yLine[0][1] < crossY && yLine[1][1] > crossY, "yAxis straddles the crossing");
+  assert.ok(Math.abs(yLine[0][0] - yLine[1][0]) < 1e-9, "yAxis is vertical");
 
   // c2p/p2c must still round-trip correctly for values across the range.
   for (const x of [1.1, 2.25, 3.4]) {
