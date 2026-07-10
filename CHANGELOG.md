@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-07-10
 
 ### Added
 - **Showcase-parity demo suite** (`examples/showcase-parity/`): one
