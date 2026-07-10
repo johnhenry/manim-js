@@ -109,6 +109,8 @@ export { reprojectCurve } from "./mobject/coordinate_reprojection.ts";
 export type { CoordSystemLike, ReprojectOptions } from "./mobject/coordinate_reprojection.ts";
 export * from "./mobject/functions.ts";
 export * from "./mobject/probability.ts";
+export { PieChart } from "./mobject/charts.ts";
+export type { PieChartConfig } from "./mobject/charts.ts";
 export * from "./mobject/vector_field.ts";
 export * from "./mobject/graphing_scale.ts";
 export { ValueTracker, DecimalNumber, Integer, alwaysRedraw } from "./mobject/value_tracker.ts";
@@ -201,8 +203,8 @@ export {
   parseSrt, serializeSrt, createTikTokStyleCaptions, captionAt,
 } from "./captions/captions.ts";
 export type { Caption, CaptionToken, CaptionPage } from "./captions/captions.ts";
-export { CaptionTrack } from "./captions/caption_track.ts";
-export type { CaptionTrackConfig } from "./captions/caption_track.ts";
+export { CaptionTrack, WordCaptionTrack } from "./captions/caption_track.ts";
+export type { CaptionTrackConfig, WordCaptionTrackConfig, WordHighlightConfig } from "./captions/caption_track.ts";
 // Audio analysis for audio-reactive animation (decode + per-frame FFT).
 export { getAudioData, visualizeAudio, getWaveformPortion, createSmoothSvgPath } from "./audio/analyze.ts";
 export type { AudioData } from "./audio/analyze.ts";

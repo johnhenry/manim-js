@@ -19,6 +19,21 @@
   `wiggle()` output is bit-identical to before (pinned by regression
   vectors).
 
+- **PieChart** (`src/mobject/charts.ts`): pie/donut charts with one
+  addressable sector per value (`chart.slices`), clockwise layout from
+  `startAngle`, `innerRadius` donut mode, `gapAngle` slice separation, and
+  percent / custom / per-slice labels. `setValues()` rebuilds geometry in
+  place — same-count updates keep each slice mobject's identity, so
+  Transforms and updater references stay valid.
+
+- **WordCaptionTrack** (`src/captions/caption_track.ts`): word-level karaoke
+  captions — one text mobject per token from `createTikTokStyleCaptions`
+  pages, so the active word can pop (`highlight.scale` over
+  `highlight.popMs`) and recolor independently while future words dim
+  (`futureOpacity`), TikTok/Submagic style. `maxWidth` wraps tokens into
+  centered lines. Styling is a pure function of the caption clock: `seekMs`
+  in either direction and updater-driven playback land on identical frames.
+
 - **Visual effects pipeline** (`src/core/effects.ts` + renderer support):
   per-mobject `blur` / `glow` / `dropShadow` / `colorAdjust`
   (brightness/contrast/saturate/hueRotate) / seeded `noise`, via a fluent
