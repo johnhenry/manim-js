@@ -295,12 +295,22 @@ export class NeuralNetworkMobject extends Group {
       const pulses: Animation[] = [];
       for (const row of this.edges[g]) {
         for (const edge of row) {
-          pulses.push(
-            new ShowPassingFlash(edge, {
-              timeWidth: pulseTimeWidth,
-              runTime: stepTime,
-            }),
-          );
+          // Pulse a bright throwaway COPY, not the live edge: flashing the
+          // real edges pins their stroke windows to [0,0] outside their own
+          // stage (the skeleton blanks for the whole pass) and
+          // ShowPassingFlash is a remover, so scene-level edges would be
+          // dropped when the play ends. The copy is introduced by the flash
+          // and removed at its finish; the skeleton never flickers.
+          const ghost = edge.copy() as any;
+          ghost.strokeColor = Color.parse("#FFFF99"); // traveling-activation tint
+          ghost.strokeOpacity = 1;
+          ghost.strokeWidth = (edge as any).strokeWidth + 1;
+          const flash = new ShowPassingFlash(ghost, {
+            timeWidth: pulseTimeWidth,
+            runTime: stepTime,
+          });
+          (flash as any).introducer = true;
+          pulses.push(flash);
         }
       }
       stages.push(new AnimationGroup(pulses, { runTime: stepTime }));
