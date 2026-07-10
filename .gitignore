@@ -11,3 +11,4 @@ dist/
 test/golden/*.actual.png
 examples/showcase-parity/out/
 examples/manim-parity/out/
+examples/motion-canvas-parity/out/
