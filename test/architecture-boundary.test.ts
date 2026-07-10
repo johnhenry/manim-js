@@ -20,9 +20,11 @@ const NODE_ONLY_ALLOWLIST = new Set([
   "renderer/fonts-node.ts",
   "video-node.ts",
   // The render service is a Node-only subsystem (protocol.ts stays node-free).
+  "service/coordinator.ts",
   "service/queue.ts",
   "service/storage.ts",
   "service/webhooks.ts",
+  "service/worker.ts",
 ]);
 
 const NODE_IMPORT_RE = /from\s+["']node:[^"']+["']|require\(\s*["']node:[^"']+["']\s*\)/;

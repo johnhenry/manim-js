@@ -77,6 +77,7 @@ function parseArgs(argv: string[]) {
 const BOOL_LONG = new Set([
   "save_last_frame", "transparent", "write_all", "verbose", "help",
   "disable_caching", "flush_cache", "save_sections", "write",
+  "wait", "watch",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,10 @@ const HELP = `ecmanim — a JavaScript port of manim (Mathematical Animation Eng
 
 Usage:
   ecmanim render <file> [scene] [options]
+  ecmanim serve --project <dir> [--port 5990] [--host 127.0.0.1]
+  ecmanim worker --coordinator <url> --project <dir>
+  ecmanim submit <scene> [--coordinator <url>] [options]
+  ecmanim jobs [--coordinator <url>] [--status <state>] [--watch]
   ecmanim cfg [--write]
   ecmanim init [file]
   ecmanim plugins
@@ -108,8 +113,19 @@ Render options:
   -c, --config <file>        Load a manim.config.{js,json}
       --bg <color>           Background color (default: #000000)
       --renderer <r>         canvas | webgl  (canvas default; webgl documented)
+      --workers <n>          Render segments across N worker threads (renderParallel)
   -v, --verbose              Verbose ffmpeg output
   -h, --help                 Show this help
+
+Render service:
+  serve   --project <dir>    Start the coordinator (queue + artifact store + webhooks)
+          [--port 5990] [--host 127.0.0.1] [--data <dir>]
+          Auth via ECMANIM_API_TOKEN / ECMANIM_WORKER_TOKEN env vars.
+  worker  --coordinator <url> --project <dir>   Start a pull-model render worker
+  submit  <scene> [--coordinator <url>] [--export <name>] [--params <json>]
+          [--params-file <path>] [--webhook <url>] [--priority <n>]
+          [--wait] [--download <path>] [-q --quality, -f --format, --fps ...]
+  jobs    [--coordinator <url>] [--status <state>] [--watch]
 
 Subcommands:
   cfg          Print the resolved default config (--write to save manim.config.json)
@@ -403,6 +419,8 @@ async function cmdRender(args: any) {
       "The Node CLI renders with the canvas renderer.");
   }
 
+  const workers = args.workers ? Number(args.workers) : 0;
+
   for (const { name, target } of targets) {
     const ext = extFor(format);
     const baseName = name && name !== "default" ? name : basename(file).replace(/\.[^.]+$/, "");
@@ -411,6 +429,24 @@ async function cmdRender(args: any) {
 
     if (args.flush_cache) {
       try { flushCache(output); console.log(`Flushed cache for ${output}`); } catch { /* ignore */ }
+    }
+
+    // --workers N: segment-parallel render across worker threads. Falls back
+    // to the sequential path automatically when it wouldn't pay off.
+    if (workers > 1) {
+      const { renderParallel } = await import(nodePath("../src/node-parallel.ts"));
+      const res = await renderParallel(resolve(file), name, {
+        outPath: output,
+        quality,
+        format,
+        resolution,
+        background: args.bg ?? undefined,
+        fps: args.fps ? Number(args.fps) : undefined,
+        workers,
+        verbose: !!args.verbose,
+      });
+      console.log(`✓ ${res.outPath} (${res.segments} segments, ${res.workers} workers, ${res.reused} reused)`);
+      continue;
     }
 
     await render(target, {
@@ -432,6 +468,131 @@ async function cmdRender(args: any) {
 }
 
 // ---------------------------------------------------------------------------
+// render-service subcommands
+// ---------------------------------------------------------------------------
+
+function coordinatorUrl(args: any): string {
+  return String(args.coordinator ?? process.env.ECMANIM_COORDINATOR_URL ?? "http://127.0.0.1:5990");
+}
+
+function apiHeaders(): Record<string, string> {
+  const token = process.env.ECMANIM_API_TOKEN;
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+async function cmdServe(args: any) {
+  if (!args.project) { console.error("serve: --project <dir> is required"); process.exit(1); }
+  const { startCoordinator } = await import(nodePath("../src/service/coordinator.ts"));
+  const c = await startCoordinator({
+    projectDir: String(args.project),
+    ...(args.data ? { dataDir: String(args.data) } : {}),
+    ...(args.host ? { host: String(args.host) } : {}),
+    ...(args.port ? { port: Number(args.port) } : {}),
+    verbose: true,
+  });
+  console.log(`ecmanim render service: ${c.url}`);
+  if (!process.env.ECMANIM_API_TOKEN) console.log("warning: ECMANIM_API_TOKEN unset — client API is unauthenticated");
+  if (!process.env.ECMANIM_WORKER_TOKEN) console.log("warning: ECMANIM_WORKER_TOKEN unset — worker API is unauthenticated");
+  await new Promise(() => {}); // run until killed
+}
+
+async function cmdWorker(args: any) {
+  if (!args.project) { console.error("worker: --project <dir> is required"); process.exit(1); }
+  const { ServiceWorker } = await import(nodePath("../src/service/worker.ts"));
+  const worker = new ServiceWorker({
+    coordinatorUrl: coordinatorUrl(args),
+    projectDir: String(args.project),
+    verbose: true,
+  });
+  console.log(`worker ${worker.workerId} polling ${coordinatorUrl(args)}`);
+  process.on("SIGINT", () => { worker.stop(); process.exit(0); });
+  await worker.run();
+}
+
+async function cmdSubmit(args: any) {
+  const scene = args._[1];
+  if (!scene) { console.error("submit: scene path (relative to the deployed project) is required"); process.exit(1); }
+  const base = coordinatorUrl(args);
+  let params: any;
+  if (args.params_file ?? args["params-file"]) {
+    const { readFileSync } = await import("node:fs");
+    params = JSON.parse(readFileSync(String(args.params_file ?? args["params-file"]), "utf8"));
+  } else if (args.params) {
+    params = JSON.parse(String(args.params));
+  }
+  const renderOpts: Record<string, any> = {};
+  if (args.quality) renderOpts.quality = args.quality;
+  if (args.format) renderOpts.format = args.format;
+  if (args.fps) renderOpts.fps = Number(args.fps);
+  if (args.resolution) renderOpts.resolution = parseResolution(args.resolution);
+  if (args.bg) renderOpts.background = args.bg;
+  const body: any = {
+    scene: String(scene),
+    ...(args.export ? { exportName: String(args.export) } : {}),
+    ...(params !== undefined ? { params } : {}),
+    ...(Object.keys(renderOpts).length ? { render: renderOpts } : {}),
+    ...(args.webhook ? { webhook: { url: String(args.webhook), ...(args.webhook_secret ? { secret: String(args.webhook_secret) } : {}) } } : {}),
+    ...(args.priority ? { priority: Number(args.priority) } : {}),
+  };
+  const res = await fetch(`${base}/api/v1/jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...apiHeaders() },
+    body: JSON.stringify(body),
+  });
+  const json: any = await res.json();
+  if (res.status !== 201) { console.error(`submit failed (HTTP ${res.status}): ${JSON.stringify(json)}`); process.exit(1); }
+  const job = json.job;
+  console.log(`job ${job.id} queued (${job.scene})`);
+  if (!args.wait && !args.download) return;
+
+  // --wait: poll with a progress line until terminal.
+  let lastLine = "";
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const j: any = (await (await fetch(`${base}/api/v1/jobs/${job.id}`, { headers: apiHeaders() })).json()).job;
+    const progress = j.progress ? ` ${j.progress.segmentsDone}/${j.progress.segmentsTotal} segments` : "";
+    const line = `  ${j.state}${progress}`;
+    if (line !== lastLine) { console.log(line); lastLine = line; }
+    if (["done", "failed", "canceled"].includes(j.state)) {
+      if (j.state !== "done") { console.error(`job ${j.state}${j.error ? `: ${j.error}` : ""}`); process.exit(1); }
+      if (args.download) {
+        const { createWriteStream } = await import("node:fs");
+        const { Readable } = await import("node:stream");
+        const { pipeline } = await import("node:stream/promises");
+        const artifact = await fetch(`${base}/api/v1/jobs/${job.id}/artifact`, { headers: apiHeaders() });
+        if (artifact.status !== 200 || !artifact.body) { console.error(`download failed: HTTP ${artifact.status}`); process.exit(1); }
+        await pipeline(Readable.fromWeb(artifact.body as any), createWriteStream(String(args.download)));
+        console.log(`✓ downloaded ${args.download}`);
+      }
+      return;
+    }
+  }
+}
+
+async function cmdJobs(args: any) {
+  const base = coordinatorUrl(args);
+  const list = async () => {
+    const q = args.status ? `?state=${encodeURIComponent(String(args.status))}` : "";
+    const res = await fetch(`${base}/api/v1/jobs${q}`, { headers: apiHeaders() });
+    if (res.status !== 200) { console.error(`jobs failed: HTTP ${res.status}`); process.exit(1); }
+    const { jobs }: any = await res.json();
+    if (!jobs.length) { console.log("(no jobs)"); return; }
+    for (const j of jobs) {
+      const progress = j.progress ? ` ${j.progress.segmentsDone}/${j.progress.segmentsTotal}` : "";
+      console.log(`${j.id}  ${j.state.padEnd(9)}${progress}  ${j.scene}${j.error ? `  (${j.error.split("\n")[0]})` : ""}`);
+    }
+  };
+  await list();
+  if (args.watch) {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000));
+      console.log("---");
+      await list();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -445,6 +606,10 @@ async function main() {
 
   switch (cmd) {
     case "render": return cmdRender(args);
+    case "serve": return cmdServe(args);
+    case "worker": return cmdWorker(args);
+    case "submit": return cmdSubmit(args);
+    case "jobs": return cmdJobs(args);
     case "plan": return cmdPlan(args);
     case "cfg": return cmdCfg(args);
     case "init": return cmdInit(args);
