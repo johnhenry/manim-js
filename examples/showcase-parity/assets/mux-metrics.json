@@ -1,0 +1,17 @@
+{
+  "note": "API-shaped fixture standing in for a live metrics endpoint (Mux-style video QoS data).",
+  "orgs": {
+    "acme": {
+      "name": "Acme Streaming",
+      "playbackShare": [58, 27, 15],
+      "playbackLabels": ["Web", "iOS", "Android"],
+      "kpis": { "views": 2140000, "watchMinutes": 8600000, "rebufferPct": 0.42 }
+    },
+    "globex": {
+      "name": "Globex Media",
+      "playbackShare": [34, 41, 25],
+      "playbackLabels": ["Web", "iOS", "Android"],
+      "kpis": { "views": 780000, "watchMinutes": 3120000, "rebufferPct": 0.87 }
+    }
+  }
+}

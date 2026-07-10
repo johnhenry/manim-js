@@ -139,6 +139,16 @@
   docs section with the user-shader contract.
 
 ### Fixed
+- **Vector-mode whitespace Text collapsed layouts**: a `Text(" ")` built with
+  a vector font produced no glyph outlines, so its bounding box degenerated
+  to a point at the origin — any `nextTo` chain through a space token
+  silently stacked everything near the origin (Code's token rows rendered
+  garbled). Whitespace-only Texts now carry an invisible box of their TRUE
+  advance width (two single-point subpaths, so no animation can make it
+  rasterize). Code token rows additionally snap to a shared BASELINE
+  (`Text.baselineOffset`) instead of bounding-box centers, eliminating
+  per-token vertical wobble between caps and descenders.
+
 - **`record()` (browser-three) captured ZERO frames whenever a single
   render exceeded the frame budget** -- e.g. post-processing bloom under
   software GL, or any sufficiently heavy scene. The pacing loop

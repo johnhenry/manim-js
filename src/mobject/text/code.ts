@@ -179,11 +179,24 @@ export class Code extends VGroup {
       const lineGroup = new VGroup();
       let prev: Text | null = null;
       let col = 0;
+      let lineBaseline: number | null = null;
       for (const t of toks) {
         // Render leading spaces so indentation is preserved; empty tokens skip.
         const display = t.text === "" ? " " : t.text;
         const tokMob = new Text(display, { ...config, color: t.color, align: "left" } as TextConfig);
-        if (prev) tokMob.nextTo(prev, V.RIGHT, 0.05);
+        if (prev) {
+          tokMob.nextTo(prev, V.RIGHT, 0.05);
+          // nextTo aligns bounding-box CENTERS, so mixed-height tokens (caps
+          // vs descenders) wobble vertically. Vector Texts record their real
+          // baseline — snap every token onto the line's shared baseline.
+          if (lineBaseline != null && tokMob.baselineOffset != null) {
+            const tokBaseline = tokMob.getCenter()[1] + tokMob.baselineOffset;
+            tokMob.shift([0, lineBaseline - tokBaseline, 0]);
+          }
+        }
+        if (lineBaseline == null && tokMob.baselineOffset != null) {
+          lineBaseline = tokMob.getCenter()[1] + tokMob.baselineOffset;
+        }
         lineGroup.add(tokMob);
         this.codeTokens.add(tokMob);
         this._tokenLoc.push({ line: idx, col });

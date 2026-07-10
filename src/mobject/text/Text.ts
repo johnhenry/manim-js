@@ -227,6 +227,10 @@ export class Text extends VGroup {
   lineSpacing: number;
   /** See {@link TextConfig.disableLigatures}. */
   disableLigatures: boolean;
+  /** Vector mode only: first-line baseline Y relative to the mobject center
+   *  AT CONSTRUCTION (world units; not maintained through later scaling).
+   *  Lets token-row layouts align mixed-height tokens on a real baseline. */
+  baselineOffset?: number;
 
   // Vector-mode data. `chars` is a VGroup of the per-glyph VMobjects (manim's
   // .chars). `_charSource` maps each glyph mob index -> source string index in
@@ -389,10 +393,41 @@ export class Text extends VGroup {
       }
     }
 
+    // Whitespace-only text produces no glyph outlines, so its bounding box
+    // would degenerate to a point at the origin — silently collapsing any
+    // nextTo/layout chain that includes a space token (Code's token rows,
+    // for example). Give it an invisible box of the TRUE advance width so
+    // it occupies its space like every other Text.
+    const hasGeometry = this.chars.submobjects.some((m: any) => m.points?.length);
+    if (this.text.length && !hasGeometry) {
+      const w = Math.max(
+        ...lines.map((line) => measureGlyphRunWidth(line, { font, px, scaleToWorld })),
+        1e-6,
+      );
+      const h = Math.max(lines.length, 1) * lineHeight;
+      // Two SINGLE-POINT subpaths at opposite corners: the bounding box spans
+      // the full advance box, but a one-point path rasterizes to nothing —
+      // even if an animation force-sets opacity (ShowIncreasingSubsets/
+      // setOpacity), there is no drawable geometry to light up.
+      this.points = [
+        [0, h / 2, 0],
+        [w, -h / 2, 0],
+      ];
+      this.subpathStarts = [0, 1];
+      this.fillOpacity = 0;
+      this.strokeOpacity = 0;
+      this.strokeWidth = 0;
+    }
+
     // Centre the whole block (manim positions text about its own centre).
-    if (this.submobjects.length) {
+    if (this.submobjects.length || this.points.length) {
       const c = this.getCenter();
       this.shift(V.neg(c));
+      // Glyphs were laid out with the first line's BASELINE at y=0, so after
+      // centering the baseline sits at -c.y relative to the mobject center.
+      // Recorded so token-row layouts (Code) can align mixed-height tokens
+      // on a true shared baseline instead of by bounding-box centers.
+      this.baselineOffset = -c[1];
     }
   }
 
