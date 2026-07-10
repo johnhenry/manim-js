@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-10
 
 ### Added
 - **Motion-Canvas-style tween ergonomics (MC1)**: `tweenTo(mob, {x: 300},
