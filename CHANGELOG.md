@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 — 2026-07-10
+
+### Added
+- **Mermaid parity suite** (`examples/mermaid-parity/`): "your Mermaid
+  diagrams, animated" — all 12 diagram types load HEADLESSLY (mermaid@11 +
+  jsdom devDependencies; no browser, no GPU) via `loadMermaid(source)` →
+  `DiagramMobject` with per-type friendly ids (`byId("A")`, `nodeIds()`,
+  `edgeIds()`, `labels()`); `revealDiagram` staged reveals (topological
+  nodes-before-edges, sequence actors→messages, gantt bars growing,
+  mindmap radial); and the flagship `diffDiagrams(v1, v2, {keyMap})` —
+  two Mermaid sources morph, kept nodes travel, labels glyph-morph
+  through renames. 13 frame-verified demos + corpus with provenance.
+- The jsdom DOM shim (in the loader, installed/torn down per render):
+  geometry-aware recursive getBBox, text-metric heuristics, CSS cascade
+  inlining, world-mapped text extraction, viewBox cropping, canvas
+  wiring for mindmap's cytoscape.
+
+### Fixed (reach every SVG consumer)
+- SVG elliptical-arc (`A`) path commands are now real arcs (endpoint→
+  center parameterization + arc-to-cubic) — they used to flatten to
+  straight chords (pie charts rendered as triangles).
+- `Color.parse` handles `rgb()/rgba()/hsl()/hsla()` — functional CSS
+  colors used to silently parse to black.
+
+
 ## 0.5.0 — 2026-07-10
 
 ### Added
