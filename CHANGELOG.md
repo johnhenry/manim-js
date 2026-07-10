@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-07-10
 
 ### Added
 - **Manim-gallery parity suite** (`examples/manim-parity/`): all 27 examples
