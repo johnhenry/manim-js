@@ -177,6 +177,11 @@ export type { Driver } from "./animation/expressions.ts";
 // Seeded deterministic noise fields (value/simplex/fbm).
 export { valueNoise1D, simplex2D, simplex3D, fbm, fbm3 } from "./core/noise.ts";
 export type { FbmOptions } from "./core/noise.ts";
+// Scene templates + themes (pure factories; compose with Timeline/transitions).
+export { resolveTheme } from "./templates/theme.ts";
+export type { Theme, ThemeInput } from "./templates/theme.ts";
+export { titleCard, lowerThird, statCounter, socialShort, chartReveal, outroCard } from "./templates/templates.ts";
+export type { TemplatePiece } from "./templates/templates.ts";
 // GSAP-style Timeline builder (relative/absolute placement -> one AnimationGroup).
 export { Timeline, timeline } from "./animation/timeline.ts";
 export type { TimelineOptions } from "./animation/timeline.ts";

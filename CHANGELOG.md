@@ -54,6 +54,17 @@
   directly by CanvasRenderer (2D and 3D-overlay; effects compose); SVG/WebGL
   backends skip (documented in `docs/renderers.md`).
 
+- **Scene templates + themes** (`src/templates/`): pure factories returning
+  `{ group, animateIn(), animateOut() }` — never auto-playing, so they
+  compose with `Timeline`/transitions: `titleCard`, `lowerThird`,
+  `statCounter` (ValueTracker-driven DecimalNumber with
+  `playThrough(runTime)`), `socialShort` (9:16 header/content/caption
+  scaffold with safe margins and auto-fit), `chartReveal` (staggers
+  BarChart bars / PieChart slices), `outroCard`. Themed via `resolveTheme`
+  (StylePreset-aware, including `registerStylePreset`'d plugin presets) with
+  accent/fontScale/margin and a foreground color derived from the
+  background's luminance.
+
 - **Visual effects pipeline** (`src/core/effects.ts` + renderer support):
   per-mobject `blur` / `glow` / `dropShadow` / `colorAdjust`
   (brightness/contrast/saturate/hueRotate) / seeded `noise`, via a fluent
