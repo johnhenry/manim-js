@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Showcase-parity demo suite** (`examples/showcase-parity/`): one
+  self-contained demo per remotion.dev/showcase entry (18 total, plus a
+  README scoring table and asset provenance). Highlights: param-fanned
+  GitHub-Unwrapped renders THROUGH the render service, a two-stage
+  screen-recording promo with camera-stop auto-zoom, an audio-reactive
+  renderGL bloom scene with FFT envelopes baked from a synthesized beat,
+  a painterly GeoJSON journey map, and an exactly-looping flow-field.
+  `npm run demos:showcase` runs all 18; CI renders three of them
+  end-to-end at low quality on every push (showcase-smoke job).
+
 - **Render service** (`ecmanim/service` + CLI `serve`/`worker`/`submit`/
   `jobs`): a coordinator (node:http control plane over a SQLite job queue
   with atomic claims, lease-based liveness, attempt-capped retries, SSE

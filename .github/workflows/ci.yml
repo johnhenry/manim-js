@@ -28,3 +28,40 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+  showcase-smoke:
+    # Three representative showcase-parity demos rendered end-to-end at low
+    # quality: 01 (canvas core + effects), 09 (word captions), 13 (geo).
+    # A real net over render()/ffmpeg/fonts that unit tests can't cast.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      - run: npm ci
+
+      - name: Render smoke demos (low quality)
+        env:
+          ECMANIM_DEMO_QUALITY: low
+          ECMANIM_DEMO_SKIP_GL: "1"
+        run: |
+          node --experimental-strip-types --no-warnings examples/showcase-parity/01-hackreels.ts
+          node --experimental-strip-types --no-warnings examples/showcase-parity/09-submagic.ts
+          node --experimental-strip-types --no-warnings examples/showcase-parity/13-electricity-maps.ts
+
+      - name: Verify outputs are real videos
+        run: |
+          for f in 01-hackreels 09-submagic 13-electricity-maps; do
+            path="examples/showcase-parity/out/$f.mp4"
+            size=$(stat -c%s "$path")
+            echo "$path: $size bytes"
+            test "$size" -gt 50000
+            ffprobe -v error -select_streams v -show_entries stream=codec_type -of csv=p=0 "$path" | grep -q video
+          done
