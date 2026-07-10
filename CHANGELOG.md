@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-07-10
 
 ### Added
 - **D3-parity foundation (campaign 2, clusters D1-D6)** — the data-viz
