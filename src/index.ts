@@ -120,6 +120,16 @@ export * from "./mobject/functions.ts";
 export * from "./mobject/probability.ts";
 export { PieChart } from "./mobject/charts.ts";
 export type { PieChartConfig } from "./mobject/charts.ts";
+export { GaugeChart } from "./mobject/gauge.ts";
+export type { GaugeChartConfig, GaugeBand } from "./mobject/gauge.ts";
+export { Legend, ColorBar } from "./mobject/legend.ts";
+export type { LegendItem, LegendConfig, ColorBarConfig } from "./mobject/legend.ts";
+export { Candlestick } from "./mobject/candlestick.ts";
+export type { CandlestickConfig, CandlestickPoint } from "./mobject/candlestick.ts";
+export { FunnelChart } from "./mobject/funnel.ts";
+export type { FunnelChartConfig, FunnelStage } from "./mobject/funnel.ts";
+export { RadarChart } from "./mobject/radar.ts";
+export type { RadarChartConfig, RadarIndicator } from "./mobject/radar.ts";
 export { ParticleSystem } from "./mobject/particles.ts";
 export type { ParticleSystemConfig, ParticleState } from "./mobject/particles.ts";
 export * from "./mobject/vector_field.ts";
@@ -190,10 +200,14 @@ export { valueNoise1D, simplex2D, simplex3D, fbm, fbm3 } from "./core/noise.ts";
 export {
   scaleLinear, scaleLog, scalePow, scaleSqrt, scaleRadial, scaleUtc, scaleTime,
   scaleBand, scalePoint, scaleOrdinal, scaleSequential, scaleDiverging, scaleQuantize,
+  scaleThreshold, visualMapContinuous,
 } from "./core/scales.ts";
-export type { ScaleLinear, ScaleTime, ScaleBand, ScaleOrdinal, ScaleSequential, ScaleQuantize } from "./core/scales.ts";
+export type {
+  ScaleLinear, ScaleTime, ScaleBand, ScaleOrdinal, ScaleSequential, ScaleQuantize,
+  ScaleThreshold, VisualMapContinuous, VisualMapContinuousConfig,
+} from "./core/scales.ts";
 export {
-  ascending, descending, extent, max, min, sum, mean, rangeOf, quantile,
+  ascending, descending, extent, max, min, sum, mean, rangeOf, quantile, movingAverage,
   group, groups, rollup, rollups, groupSort, pairs, ticks, tickStep, tickIncrement, niceExtent,
 } from "./core/array_utils.ts";
 export { format, formatSpecifierAuto, utcFormat, utcDay, utcSunday, utcMonday, utcMonth, utcYear } from "./core/format.ts";

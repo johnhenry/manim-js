@@ -763,12 +763,16 @@ export class Axes extends VGroup {
       addVertexDots?: boolean;
       vertexDotStyle?: { color?: ColorLike; radius?: number };
       lineColor?: ColorLike;
+      /** Catmull-Rom smoothing through the data points (ECharts `smooth:
+       *  true`) instead of straight corner-to-corner segments. */
+      smooth?: boolean;
     } = {}
   ): VGroup {
     const color = opts.lineColor ?? "#FFFF00";
     const points = xValues.map((x, i) => this.coordsToPoint(x, yValues[i]));
     const line = new VMobject({ strokeColor: color, color });
-    line.setPointsAsCorners(points);
+    if (opts.smooth) line.setPointsSmoothly(points);
+    else line.setPointsAsCorners(points);
     line.fillOpacity = 0;
     const group = new VGroup();
     group.add(line);

@@ -8,6 +8,7 @@ import { Sector, AnnularSector } from "./arcs.ts";
 import { Text } from "./text/Text.ts";
 import { TAU } from "../core/math/vector.ts";
 import { BLUE, YELLOW, RED, GREEN, PURPLE, ORANGE, TEAL, PINK } from "../core/color.ts";
+import { scaleLinear, scaleRadial } from "../core/scales.ts";
 import type { ColorLike } from "../core/types.ts";
 
 const DEFAULT_SLICE_COLORS: ColorLike[] = [BLUE, YELLOW, RED, GREEN, PURPLE, ORANGE, TEAL, PINK];
@@ -23,6 +24,11 @@ export interface PieChartConfig {
   innerRadius?: number;
   /** Gap between adjacent slices, in radians (default 0). */
   gapAngle?: number;
+  /** ECharts `roseType`: 'radius' → equal angle per slice, radius linear in
+   *  value; 'area' → equal angle per slice, radius ∝ sqrt(value) so slice
+   *  AREA is linear in value. Omitted (default) → the classic pie: angle
+   *  proportional to value, one shared radius. */
+  roseType?: "radius" | "area";
   /** true → percentage labels; or explicit label strings (one per value). */
   labels?: boolean | string[];
   /** Custom label text from (value, index, fraction). Implies labels on. */
@@ -58,14 +64,23 @@ export class PieChart extends VGroup {
     this._build();
   }
 
-  private _sliceGeometry(): Array<{ startAngle: number; angle: number; midAngle: number; fraction: number }> {
-    const { startAngle = TAU / 4, gapAngle = 0 } = this._config;
+  private _sliceGeometry(): Array<{ startAngle: number; angle: number; midAngle: number; fraction: number; radius?: number }> {
+    const { startAngle = TAU / 4, gapAngle = 0, roseType, radius = 2, innerRadius = 0 } = this._config;
     const total = this.values.reduce((s, v) => s + Math.max(0, v), 0) || 1;
-    const out: Array<{ startAngle: number; angle: number; midAngle: number; fraction: number }> = [];
+    const out: Array<{ startAngle: number; angle: number; midAngle: number; fraction: number; radius?: number }> = [];
+    // roseType: equal angle per slice; radius scales with value (linear for
+    // 'radius', sqrt/area-true for 'area') instead of one shared radius.
+    const radiusScale = roseType
+      ? (roseType === "area" ? scaleRadial : scaleLinear)(
+          [0, Math.max(...this.values, 0)],
+          [innerRadius, radius],
+        )
+      : undefined;
     let cursor = startAngle;
+    const n = this.values.length || 1;
     for (const raw of this.values) {
       const fraction = Math.max(0, raw) / total;
-      const sweep = fraction * TAU;
+      const sweep = roseType ? TAU / n : fraction * TAU;
       // Clockwise: angles decrease. Gap is split evenly on both sides.
       const gap = Math.min(gapAngle, sweep);
       out.push({
@@ -73,17 +88,19 @@ export class PieChart extends VGroup {
         angle: sweep - gap,
         midAngle: cursor - sweep / 2,
         fraction,
+        ...(radiusScale ? { radius: radiusScale(Math.max(0, raw)) } : {}),
       });
       cursor -= sweep;
     }
     return out;
   }
 
-  private _makeSlice(geo: { startAngle: number; angle: number }, i: number): VMobject {
+  private _makeSlice(geo: { startAngle: number; angle: number; radius?: number }, i: number): VMobject {
     const {
-      radius = 2, innerRadius = 0, colors = DEFAULT_SLICE_COLORS,
+      radius: configRadius = 2, innerRadius = 0, colors = DEFAULT_SLICE_COLORS,
       strokeColor, strokeWidth = 0, fillOpacity = 1,
     } = this._config;
+    const radius = geo.radius ?? configRadius;
     const color = colors[i % colors.length];
     const common = {
       startAngle: geo.startAngle, angle: geo.angle,
@@ -103,11 +120,12 @@ export class PieChart extends VGroup {
     return null;
   }
 
-  private _labelRadius(): number {
+  private _labelRadius(sliceRadius?: number): number {
     const { radius = 2, innerRadius = 0 } = this._config;
+    const r = sliceRadius ?? radius;
     // Mid-ring for donuts; a bit past halfway for full pies (visual center of
     // mass of a slice sits outward of r/2).
-    return innerRadius > 0 ? (innerRadius + radius) / 2 : radius * 0.6;
+    return innerRadius > 0 ? (innerRadius + r) / 2 : r * 0.6;
   }
 
   private _buildLabels(geos: ReturnType<PieChart["_sliceGeometry"]>): void {
@@ -115,7 +133,6 @@ export class PieChart extends VGroup {
     this._labelsGroup.submobjects.length = 0;
     this.labels.length = 0;
     if (!labels && !labelFormat) return;
-    const lr = this._labelRadius();
     geos.forEach((geo, i) => {
       const text = this._labelText(this.values[i], i, geo.fraction);
       if (text == null || geo.angle <= 0) return;
@@ -123,6 +140,9 @@ export class PieChart extends VGroup {
         fontSize: labelFontSize,
         ...(labelColor !== undefined ? { color: labelColor } : {}),
       });
+      // roseType slices carry their own radius (geo.radius); regular pies
+      // share one config radius — _labelRadius(undefined) falls back to it.
+      const lr = this._labelRadius(geo.radius);
       label.moveTo([lr * Math.cos(geo.midAngle), lr * Math.sin(geo.midAngle), 0]);
       this.labels.push(label);
     });
@@ -157,6 +177,8 @@ export class PieChart extends VGroup {
         if (slice instanceof AnnularSector && fresh instanceof AnnularSector) {
           slice.startAngle = fresh.startAngle;
           slice.angle = fresh.angle;
+          slice.outerRadius = fresh.outerRadius;
+          slice.innerRadius = fresh.innerRadius;
         }
       });
     } else {

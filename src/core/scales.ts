@@ -8,6 +8,8 @@
 
 import { ticks, tickIncrement, niceExtent, tickStep } from "./array_utils.ts";
 import { formatSpecifierAuto, format } from "./format.ts";
+import { Color } from "./color.ts";
+import type { ColorLike } from "./types.ts";
 
 type Numeric = number | Date | { valueOf(): number };
 
@@ -523,6 +525,110 @@ export function scaleQuantize<R = any>(domain?: [number, number], range?: Iterab
   if (domain) scale.domain(domain);
   if (range) scale.range(range);
   return scale;
+}
+
+export interface ScaleThreshold<R = any> {
+  (value: number): R;
+  domain(): number[];
+  domain(d: number[]): ScaleThreshold<R>;
+  range(): R[];
+  range(r: Iterable<R>): ScaleThreshold<R>;
+  invertExtent(v: R): [number | undefined, number | undefined];
+}
+
+/** d3.scaleThreshold: arbitrary (non-equal-width) cut points. `domain` is n-1
+ *  ascending cutpoints; `range` is n values. value < domain[0] -> range[0],
+ *  domain[i-1] <= value < domain[i] -> range[i], value >= domain[n-2] -> range[n-1]. */
+export function scaleThreshold<R = any>(domain?: number[], range?: Iterable<R>): ScaleThreshold<R> {
+  let dom: number[] = [];
+  let rng: R[] = [0, 1] as any;
+  const scale = ((value: number): R => {
+    let i = 0;
+    while (i < dom.length && value >= dom[i]) i++;
+    return rng[Math.min(i, rng.length - 1)];
+  }) as ScaleThreshold<R>;
+  scale.domain = ((d?: number[]) => (d === undefined ? [...dom] : ((dom = [...d]), scale))) as ScaleThreshold<R>["domain"];
+  scale.range = ((r?: Iterable<R>) => (r === undefined ? [...rng] : ((rng = [...r]), scale))) as ScaleThreshold<R>["range"];
+  scale.invertExtent = (v: R): [number | undefined, number | undefined] => {
+    const i = rng.indexOf(v);
+    return i < 0 ? [undefined, undefined] : [dom[i - 1], dom[i]];
+  };
+  if (domain) scale.domain(domain);
+  if (range) scale.range(range);
+  return scale;
+}
+
+// --- visualMap (ECharts-style continuous value -> visual encoding) -----------
+
+export interface VisualMapContinuousConfig {
+  /** Data domain, e.g. [min, max] of the mapped dimension. */
+  domain: [number, number];
+  inRange?: {
+    /** Output range for a size encoding (e.g. bubble radius), linear. */
+    symbolSize?: [number, number];
+    /** Output color range: either a fixed [color0, color1] pair (RGB lerp)
+     *  or a direct interpolator(t) function (e.g. an interpolate* from
+     *  color_schemes.ts). */
+    color?: [ColorLike, ColorLike] | ((t: number) => ColorLike);
+    /** Output lightness range applied to a single base color (ECharts'
+     *  colorLightness) — [l0, l1], each in [0,1]. Approximated via HSV's
+     *  value channel (Color has no HSL support) — visually close for the
+     *  "lighten toward white as value drops" look ECharts examples use. */
+    colorLightness?: { base: ColorLike; range: [number, number] };
+  };
+  /** Fallback size/color for values outside `domain` (ECharts' outOfRange).
+   *  When omitted, values clamp to the nearest in-range output instead. */
+  outOfRange?: { symbolSize?: number; color?: ColorLike };
+  /** Clamp values into [domain[0], domain[1]] before mapping (default true). */
+  clamp?: boolean;
+}
+
+export interface VisualMapContinuous {
+  size(value: number): number | undefined;
+  color(value: number): ColorLike | undefined;
+  /** A ColorBar-ready domain + interpolator pair for a matching legend swatch. */
+  domain: [number, number];
+  interpolator: (t: number) => ColorLike;
+}
+
+/** Bundles a value's domain + size/color output ranges into one mapper,
+ *  mirroring ECharts' `visualMap: {type: 'continuous', ...}`. The returned
+ *  `size`/`color` functions are pure and honor `outOfRange`. */
+export function visualMapContinuous(config: VisualMapContinuousConfig): VisualMapContinuous {
+  const { domain, inRange = {}, outOfRange, clamp = true } = config;
+  const [lo, hi] = domain;
+  const t = (value: number): number => {
+    const raw = hi === lo ? 0.5 : (value - lo) / (hi - lo);
+    return clamp ? Math.max(0, Math.min(1, raw)) : raw;
+  };
+  const inBounds = (value: number): boolean => value >= lo && value <= hi;
+
+  const sizeScale = inRange.symbolSize ? scaleLinear(domain as any, inRange.symbolSize).clamp(clamp) : undefined;
+  let interpolator: (t: number) => ColorLike = () => "#000000";
+  if (typeof inRange.color === "function") {
+    interpolator = inRange.color;
+  } else if (Array.isArray(inRange.color)) {
+    const [c0, c1] = inRange.color;
+    interpolator = (tt: number) => Color.lerp(c0, c1, tt);
+  } else if (inRange.colorLightness) {
+    const { base, range } = inRange.colorLightness;
+    const [l0, l1] = range;
+    const [h, s] = Color.parse(base).toHsv();
+    interpolator = (tt: number) => Color.fromHsv(h, s, l0 + (l1 - l0) * tt);
+  }
+
+  return {
+    domain,
+    interpolator,
+    size(value: number): number | undefined {
+      if (!inBounds(value) && outOfRange?.symbolSize !== undefined) return outOfRange.symbolSize;
+      return sizeScale?.(value);
+    },
+    color(value: number): ColorLike | undefined {
+      if (!inBounds(value) && outOfRange?.color !== undefined) return outOfRange.color;
+      return interpolator(t(value));
+    },
+  };
 }
 
 export { ticks, tickStep, tickIncrement, niceExtent };

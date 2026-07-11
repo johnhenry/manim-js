@@ -76,6 +76,21 @@ export function quantile(values: Iterable<number>, p: number, accessor?: (d: any
   return arr[i0] + (arr[i0 + 1] - arr[i0]) * (h - i0);
 }
 
+/** Simple moving average over a fixed window (ECharts MA5/MA10-style). Output
+ *  has the same length as `values`; entries before the window fills (i <
+ *  window-1) are NaN, matching a chart's "no MA yet" convention. */
+export function movingAverage(values: number[], window: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN);
+  if (window <= 0) return out;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= window) sum -= values[i - window];
+    if (i >= window - 1) out[i] = sum / window;
+  }
+  return out;
+}
+
 export function group<T, K>(values: Iterable<T>, key: (d: T) => K): Map<K, T[]> {
   const m = new Map<K, T[]>();
   for (const d of values) {
