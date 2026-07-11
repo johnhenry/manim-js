@@ -263,12 +263,51 @@ export class Axes extends VGroup {
 
     this.add(this.xAxis, this.yAxis);
 
+    // The y-axis NumberLine's OWN _addNumbers() (triggered inside its
+    // constructor above if includeNumbers was set via yAxisConfig/
+    // axisConfig) ran BEFORE the rotate() call: it positions each label at a
+    // LOCAL offset assuming a horizontal line ("below the tick"). After the
+    // 90° rotation that offset lands sideways -- INSIDE the plot area
+    // instead of to the axis's left (the bug addCoordinates() already works
+    // around for its own call path, below). Discard those mispositioned
+    // labels here; they get rebuilt correctly (post-rotation, world-space)
+    // after centering, same as addCoordinates().
+    if (this.yAxis.includeNumbers && this.yAxis.numbers) {
+      this.yAxis.remove(this.yAxis.numbers);
+      this.yAxis.numbers = undefined as any;
+    }
+
     // manim parity: Axes centers ITSELF on screen after construction (its
     // data origin is wherever the ranges put it). Asymmetric ranges like
     // xRange [0, 5] used to hang off-screen up-right because the data origin
     // sat at the world origin. coordsToPoint reads live axis geometry, so
     // the mapping follows the shift.
     this.center();
+
+    if (this.yAxis.includeNumbers && !this.yAxis.numbers) {
+      this._buildYNumbers();
+    }
+  }
+
+  /** Build y-axis number labels in WORLD space via coordsToPoint (correct
+   *  regardless of the y-axis's post-construction rotation) -- shared by the
+   *  constructor (when yAxisConfig.includeNumbers is set) and
+   *  addCoordinates(). */
+  private _buildYNumbers(): VGroup {
+    const numbers = new VGroup();
+    for (const y of makeTickRange(this.yRange)) {
+      if (Math.abs(y) < 1e-9) continue;
+      const p = this.coordsToPoint(0, y);
+      const t = new Text(this.xAxis._formatNumber(y), {
+        fontSize: this.yAxis.fontSize,
+        color: this.yAxis.color,
+        point: [p[0] - 0.3, p[1], 0],
+      });
+      numbers.add(t);
+    }
+    this.yAxis.numbers = numbers;
+    this.yAxis.add(numbers);
+    return numbers;
   }
 
   // Data value used as each axis's crossing reference: 0 when it's actually
@@ -498,23 +537,10 @@ export class Axes extends VGroup {
     this.xAxis.includeNumbers = true;
     if (!this.xAxis.numbers) this.xAxis._addNumbers();
     this.yAxis.includeNumbers = true;
-    if (!this.yAxis.numbers) {
-      // Build y numbers as free labels positioned by the axes mapping (the
-      // y-axis was rotated, so its own _addNumbers would place them wrong).
-      const numbers = new VGroup();
-      for (const y of makeTickRange(this.yRange)) {
-        if (Math.abs(y) < 1e-9) continue;
-        const p = this.coordsToPoint(0, y);
-        const t = new Text(this.xAxis._formatNumber(y), {
-          fontSize: this.yAxis.fontSize,
-          color: this.yAxis.color,
-          point: [p[0] - 0.3, p[1], 0],
-        });
-        numbers.add(t);
-      }
-      this.yAxis.numbers = numbers;
-      this.yAxis.add(numbers);
-    }
+    // Build y numbers as free labels positioned by the axes mapping (the
+    // y-axis was rotated, so its own _addNumbers would place them wrong —
+    // see _buildYNumbers()'s doc comment / the constructor's matching fix).
+    if (!this.yAxis.numbers) this._buildYNumbers();
     return this;
   }
 

@@ -65,6 +65,50 @@ test("addCoordinates adds number mobjects to both axes", () => {
   assert.ok(ax.getYAxis().numbers.submobjects.length > 0);
 });
 
+// Regression (ECharts campaign, examples/echarts-parity/02-line-area-smooth.ts
+// port): the y-axis NumberLine's own _addNumbers() positions labels with a
+// LOCAL offset assuming a horizontal line ("below the tick"); Axes rotates
+// the whole y-axis 90 degrees AFTER construction, so a label built that way
+// lands sideways -- inside the plot area instead of beside the axis. This
+// bit two independent campaign port agents before the constructor was fixed
+// to rebuild y-numbers in world space (same fix addCoordinates() already had).
+test("yAxisConfig.includeNumbers positions labels beside the y-axis, not inside the plot", () => {
+  const ax = new Axes({
+    xRange: [0, 10, 1],
+    yRange: [0, 100, 20],
+    yAxisConfig: { includeNumbers: true },
+  });
+  const labels = ax.getYAxis().numbers.submobjects;
+  assert.ok(labels.length > 0, "y-axis numbers were built");
+  const yAxisX = ax.getYAxis().axisLine.getCenter()[0];
+  for (const label of labels) {
+    const [lx] = label.getCenter();
+    // Correct placement hugs the y-axis line (a small fixed buffer to its
+    // side); the pre-fix bug scattered labels across the chart's x-extent
+    // (multiple world units away) because the local horizontal-line offset
+    // got rotated into a large sideways displacement.
+    assert.ok(
+      Math.abs(lx - yAxisX) < 1,
+      `y-axis label at x=${lx} should hug the y-axis (x=${yAxisX}), not land inside the plot`,
+    );
+  }
+});
+
+test("constructor-built and addCoordinates()-built y-axis numbers land at the same positions", () => {
+  const a = new Axes({ xRange: [0, 10, 1], yRange: [0, 100, 20], yAxisConfig: { includeNumbers: true } });
+  const b = new Axes({ xRange: [0, 10, 1], yRange: [0, 100, 20] });
+  b.addCoordinates();
+  const centersA = a.getYAxis().numbers.submobjects.map((m: any) => m.getCenter());
+  const centersB = b.getYAxis().numbers.submobjects.map((m: any) => m.getCenter());
+  assert.equal(centersA.length, centersB.length);
+  for (let i = 0; i < centersA.length; i++) {
+    assert.ok(
+      Math.hypot(centersA[i][0] - centersB[i][0], centersA[i][1] - centersB[i][1]) < 1e-9,
+      `label ${i} should match between the two build paths`,
+    );
+  }
+});
+
 test("plotParametricCurve of a circle has finite points", () => {
   const ax = new Axes({ xRange: [-2, 2, 1], yRange: [-2, 2, 1] });
   const curve = ax.plotParametricCurve(
