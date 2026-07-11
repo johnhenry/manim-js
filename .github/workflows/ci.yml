@@ -55,6 +55,8 @@ jobs:
             demos: "01-flowchart 02-sequence 13-diagram-diff"
           - suite: lottie-parity
             demos: "01-bodymovin 02-gatin 05-navidad"
+          - suite: echarts-parity
+            demos: "06-gauge 08-candlestick 01-bar-race"
     steps:
       - uses: actions/checkout@v4
 
