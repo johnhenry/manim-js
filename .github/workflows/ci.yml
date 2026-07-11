@@ -59,6 +59,8 @@ jobs:
             demos: "06-gauge 08-candlestick 01-bar-race"
           - suite: gsap-parity
             demos: "02-stagger-distributions 04-shape-morph 05-motion-path-autorotate"
+          - suite: p5-parity
+            demos: "03-flocking-boids 05-l-system 06-game-of-life"
     steps:
       - uses: actions/checkout@v4
 
