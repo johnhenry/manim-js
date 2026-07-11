@@ -86,6 +86,12 @@ interface ExtraConfig extends AnimationConfig {
   startRadius?: number;
   fillOpacity?: number;
   strokeWidth?: number;
+  /** MoveAlongPath: rotate the mobject to track the path's tangent direction
+   *  as it travels (GSAP MotionPathPlugin's `autoRotate`, default false). */
+  autoRotate?: boolean;
+  /** MoveAlongPath: constant offset (radians) added to the auto-rotation
+   *  angle, for a mobject whose "forward" isn't +X (default 0). */
+  autoRotateOffset?: number;
   /** Force the highlight geometry to render fixed-in-frame / fixed-
    *  orientation under a 3D camera (see the `_fixedInFrame`/
    *  `_fixedOrientation` doc note above each class below). Defaults to
@@ -310,18 +316,41 @@ export class Rotate extends Animation {
 // --- movement --------------------------------------------------------------
 
 // Move the mobject so its center follows `path` (a VMobject) via
-// path.pointFromProportion(alpha).
+// path.pointFromProportion(alpha). With `autoRotate`, also orients the
+// mobject to the path's tangent direction (VMobject.tangentAtProportion --
+// an exact cubic-bezier derivative, no finite-difference sampling needed)
+// each frame. `.rotate()` is relative, not "set absolute angle", so --
+// same technique as GaugeChart's needle (mobject/gauge.ts, setValue()) --
+// this tracks the last angle it applied and rotates by the delta each call,
+// which stays scrub-safe (jumping straight from any alpha to any other
+// alpha still lands on the correct absolute orientation).
 export class MoveAlongPath extends Animation {
   path: any;
+  autoRotate: boolean;
+  autoRotateOffset: number;
+  private _lastAngle = 0;
 
   constructor(mobject: any, path: any, config: ExtraConfig = {}) {
     super(mobject, config);
     this.path = path;
+    this.autoRotate = config.autoRotate ?? false;
+    this.autoRotateOffset = config.autoRotateOffset ?? 0;
+  }
+
+  setup(): void {
+    this._lastAngle = 0;
   }
 
   interpolateMobject(alpha: number): void {
     const target = this.path.pointFromProportion(alpha);
     this.mobject.moveTo(target);
+    if (this.autoRotate) {
+      const tangent = this.path.tangentAtProportion(alpha);
+      const angle = Math.atan2(tangent[1], tangent[0]) + this.autoRotateOffset;
+      const delta = angle - this._lastAngle;
+      if (delta !== 0) this.mobject.rotate(delta);
+      this._lastAngle = angle;
+    }
   }
 }
 

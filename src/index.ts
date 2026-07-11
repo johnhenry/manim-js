@@ -182,7 +182,8 @@ export type { DiagramGraph, DiagramNode, DiagramEdge, BoardOptions } from "./dia
 // Learnings from prior-art (py2ts converter, signals reactivity, frame Player).
 export { convert as py2ts } from "./tools/py2ts.ts";
 export * from "./reactive/signal.ts";
-export { Player } from "./player.ts";
+export { Player, bindScroll, bindPlayerToScroll, computeScrollProgress } from "./player.ts";
+export type { ScrollBindingOptions, ScrollBinding, ScrollProgressInput } from "./player.ts";
 export { Homotopy, SmoothedVectorizedHomotopy, ComplexHomotopy, PhaseFlow } from "./animation/movement.ts";
 export { ShowPassingFlash, ShowPassingFlashWithThinningStrokeWidth, ApplyWave, Blink } from "./animation/indication_extra.ts";
 export { AnimatedBoundary, TracedPath } from "./animation/changing.ts";
@@ -274,8 +275,13 @@ export type { TimelineOptions } from "./animation/timeline.ts";
 // count/yoyo/repeatDelay wrapper for any leaf Animation/AnimationGroup/Timeline.
 export { Repeat } from "./animation/repeat.ts";
 export type { RepeatConfig } from "./animation/repeat.ts";
-// Composable stagger value-transform helpers (cycle()/staggerRange()).
-export { cycle, staggerRange } from "./animation/stagger.ts";
+// Composable stagger value-transform helpers (cycle()/staggerRange()/staggerGrid()).
+export { cycle, staggerRange, staggerGrid } from "./animation/stagger.ts";
+export type { StaggerGridOptions } from "./animation/stagger.ts";
+// GSAP Flip plugin parity: capture a "First" bounding/geometry snapshot
+// before an instant layout change, then glide from it to the "Last" state.
+export { flipGetState, flipFrom } from "./animation/flip.ts";
+export type { FlipState, FlipFromConfig } from "./animation/flip.ts";
 // Motion-Canvas-style tween ergonomics (chainable tweens, spring presets, seeded RNG).
 export {
   tweenTo, tweenSignal, tween, map, TweenChain, springTween, useRandom,

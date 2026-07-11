@@ -256,6 +256,19 @@ export class Player {
   }
 
   /**
+   * Seek to a fractional position in [0, 1] across the full recorded clip
+   * (0 = first frame, 1 = last frame), clamped. Convenience for driving
+   * playback from an external 0..1 progress value instead of a frame index
+   * or a time — e.g. `bindPlayerToScroll()` below, which maps scroll
+   * progress straight onto this.
+   */
+  seekFraction(progress: number): void {
+    if (this.frames.length === 0) return;
+    const p = Math.max(0, Math.min(1, progress));
+    this.seek(Math.round(p * (this.frames.length - 1)));
+  }
+
+  /**
    * Re-render the LAST recorded frame's live mobjects straight to the display
    * canvas, reflecting the current state of `this.camera` (e.g. after a
    * Studio interactive-camera pan/zoom/orbit). Unlike seek()/drawFrameTo(),
@@ -434,4 +447,287 @@ export class Player {
     for (const s of steps) if (s.startFrame < this._current - 1) target = s.startFrame;
     this.seek(target);
   }
+}
+
+// =============================================================================
+// Scroll binding (Campaign 7 gap-fill): the shared primitive behind GSAP
+// ScrollTrigger's `scrub`, `pin`, and (via ScrollSmoother) `data-speed`
+// parallax — patterns 07/08/09 of examples/gsap-parity. Deliberately a MUCH
+// smaller subset than ScrollTrigger's full feature surface: just "map scroll
+// position to a 0..1 progress" plus an optional viewport pin, wired to real
+// `scroll`/`resize` DOM events.
+// =============================================================================
+
+/**
+ * Inputs to the pure scroll-progress formula: a trigger element's geometry
+ * (already resolved to plain numbers) plus the current scroll position.
+ * `elementTop` must be the element's top offset within the whole scrollable
+ * DOCUMENT (not viewport-relative) — i.e. `el.getBoundingClientRect().top +
+ * window.scrollY` at the time of measurement.
+ */
+export interface ScrollProgressInput {
+  elementTop: number;
+  elementHeight: number;
+  viewportHeight: number;
+  scrollY: number;
+  start?: string | number;
+  end?: string | number;
+}
+
+// GSAP's ScrollTrigger accepts a loose string grammar for `start`/`end`
+// ("top top", "center bottom", "+=500", ...). We implement a deliberately
+// small subset of that grammar — just enough for the 3 patterns this
+// campaign targets, not the full ScrollTrigger DSL:
+//
+//   "<edge> <viewportEdge>"   edge/viewportEdge each one of top|center|bottom.
+//                             Resolves to the absolute document scrollY at
+//                             which the element's edge lines up with that
+//                             point in the viewport (the exact formula
+//                             ScrollTrigger itself uses):
+//                               elementRef  = elementTop + elementHeight * edgeFrac
+//                               viewportRef = viewportHeight * viewportFrac
+//                               scrollY     = elementRef - viewportRef
+//   "+=N" / "-=N"             a pixel offset RELATIVE to the resolved `start`
+//                             value (only meaningful for `end`).
+//   <number>                  an absolute document scrollY, taken as-is.
+//
+// Defaults when `start`/`end` are omitted: start = "top top" (range begins
+// the instant the element's top hits the viewport top), end = "bottom top"
+// (range ends when the element's bottom passes the viewport top) — i.e. by
+// default the scroll range spans exactly one elementHeight, edge to edge.
+//
+// Progress is the linear fraction of the current scrollY between the
+// resolved start/end scrollY values, clamped to [0, 1]:
+//
+//   progress = clamp((scrollY - startY) / (endY - startY), 0, 1)
+
+function resolveEdgeString(spec: string, elementTop: number, elementHeight: number, viewportHeight: number): number {
+  const [edgeRaw, viewportRaw] = spec.trim().split(/\s+/);
+  const edgeFrac = edgeRaw === "top" ? 0 : edgeRaw === "bottom" ? 1 : 0.5; // "center" (or unrecognized)
+  const viewportFrac = viewportRaw === "top" ? 0 : viewportRaw === "bottom" ? 1 : 0.5;
+  return (elementTop + elementHeight * edgeFrac) - (viewportHeight * viewportFrac);
+}
+
+/** Resolve a `start`/`end` spec (number | "<edge> <viewportEdge>" | "+=N"/"-=N") into an absolute document scrollY. */
+function resolveScrollPos(
+  spec: string | number | undefined,
+  fallback: string,
+  elementTop: number,
+  elementHeight: number,
+  viewportHeight: number,
+  relativeBase: number,
+): number {
+  const s = spec ?? fallback;
+  if (typeof s === "number") return s;
+  const rel = /^([+-]=)(\d+(?:\.\d+)?)$/.exec(s.trim());
+  if (rel) return relativeBase + (rel[1] === "+=" ? 1 : -1) * parseFloat(rel[2]);
+  return resolveEdgeString(s, elementTop, elementHeight, viewportHeight);
+}
+
+/**
+ * Pure math core of scroll binding: map a scroll position + trigger geometry
+ * to a clamped 0..1 progress value. No DOM access whatsoever — fully
+ * Node-testable in isolation from the DOM-event-wiring in bindScroll() below.
+ * See the format notes above for the `start`/`end` mini-DSL.
+ */
+export function computeScrollProgress(input: ScrollProgressInput): number {
+  const { elementTop, elementHeight, viewportHeight, scrollY } = input;
+  const startY = resolveScrollPos(input.start, "top top", elementTop, elementHeight, viewportHeight, 0);
+  const endY = resolveScrollPos(input.end, "bottom top", elementTop, elementHeight, viewportHeight, startY);
+  if (endY <= startY) return scrollY >= startY ? 1 : 0; // degenerate zero/negative-length range
+  return Math.max(0, Math.min(1, (scrollY - startY) / (endY - startY)));
+}
+
+export interface ScrollBindingOptions {
+  /** The element whose scroll-position-within-viewport drives playback
+   *  (typically a tall "scroll spacer" wrapping/preceding the pinned/scrubbed
+   *  content — matches ScrollTrigger's `trigger` element). */
+  trigger: any; // HTMLElement in the browser
+  /** Range start; see the mini-DSL notes above. Default: "top top". */
+  start?: string | number;
+  /** Range end; see the mini-DSL notes above. Default: "bottom top". */
+  end?: string | number;
+  /** Called with scroll progress 0..1 (already clamped) whenever it changes,
+   *  rAF-throttled (never synchronously on every scroll event). */
+  onProgress: (progress: number) => void;
+  /** Pin the trigger element in the viewport (position: fixed) while progress
+   *  is strictly within (0, 1), matching ScrollTrigger's pin:true (pattern
+   *  08). Unpinned (normal flow) at progress 0 or 1. Default: false — 07/09
+   *  don't pin. No spacer element is inserted (deliberately, to keep this
+   *  small): once pinned, the trigger leaves normal flow, which will shift
+   *  layout below it, exactly like ScrollTrigger without `pinSpacing`. */
+  pin?: boolean;
+}
+
+export interface ScrollBinding {
+  /** Tear down all listeners (scroll/resize) and undo any pin styling. */
+  destroy(): void;
+  /** Force a re-measure of the trigger's geometry + recompute (e.g. after an
+   *  external layout change), same as what a `resize` event triggers. */
+  refresh(): void;
+}
+
+interface ScrollGeometry {
+  elementTop: number;
+  elementHeight: number;
+  viewportHeight: number;
+  left: number;
+  width: number;
+}
+
+/**
+ * Bind an element's scroll-position-within-viewport to a progress callback —
+ * a small subset of GSAP ScrollTrigger's scrub/pin core (just the
+ * scroll-to-progress mapping + optional pin, not its full feature surface).
+ *
+ * Browser-only: throws a clear error (never a silent no-op) if `window`/
+ * `document` aren't present, mirroring this file's `hasDocument`-style
+ * capability-probe convention (see the top of player.ts). Note this check is
+ * intentionally evaluated fresh on every call rather than reusing the
+ * module-level `hasDocument` const — that const is captured once at import
+ * time, whereas bindScroll() may run in a test harness that installs a fake
+ * `window`/`document` on `globalThis` AFTER this module has already loaded;
+ * a live check is required for that to work. Behavior in real Node/browser
+ * processes is identical either way (neither appears/disappears mid-process).
+ *
+ * Geometry (element position, height, viewport height) is measured ONCE up
+ * front and cached — matching real ScrollTrigger, which measures at
+ * setup/refresh time rather than re-measuring on every scroll — so `scroll`
+ * events only read `window.scrollY` and recompute the pure progress formula;
+ * call `refresh()` (or fire `resize`) after any layout change.
+ */
+export function bindScroll(options: ScrollBindingOptions): ScrollBinding {
+  const win: any = (globalThis as any).window;
+  const doc: any = (globalThis as any).document;
+  if (typeof win === "undefined" || typeof doc === "undefined") {
+    throw new Error(
+      "bindScroll() requires a browser DOM (window/document) -- it wires up " +
+      "real scroll/resize listeners, which don't exist under plain Node. " +
+      "Guard call sites the same way other browser-only code in player.ts " +
+      "does (see the hasDocument capability probe near the top of this file).",
+    );
+  }
+
+  const { trigger, start, end, onProgress, pin = false } = options;
+
+  let cachedGeo: ScrollGeometry | null = null;
+  let lastProgress: number | null = null;
+  let rafId: any = null;
+  let pendingResize = false;
+  let pinned = false;
+  let pinStyles: { position: string; top: string; left: string; width: string; zIndex: string } | null = null;
+
+  function measureGeometry(): ScrollGeometry {
+    const rect = trigger.getBoundingClientRect();
+    return {
+      elementTop: rect.top + win.scrollY,
+      elementHeight: rect.height,
+      viewportHeight: win.innerHeight,
+      left: rect.left,
+      width: rect.width,
+    };
+  }
+
+  function applyPin(geo: ScrollGeometry): void {
+    if (pinned) return;
+    pinStyles = {
+      position: trigger.style.position, top: trigger.style.top,
+      left: trigger.style.left, width: trigger.style.width, zIndex: trigger.style.zIndex,
+    };
+    trigger.style.position = "fixed";
+    trigger.style.top = "0px";
+    trigger.style.left = `${geo.left}px`;
+    trigger.style.width = `${geo.width}px`;
+    trigger.style.zIndex = trigger.style.zIndex || "1";
+    pinned = true;
+  }
+
+  function removePin(): void {
+    if (!pinned) return;
+    if (pinStyles) {
+      trigger.style.position = pinStyles.position;
+      trigger.style.top = pinStyles.top;
+      trigger.style.left = pinStyles.left;
+      trigger.style.width = pinStyles.width;
+      trigger.style.zIndex = pinStyles.zIndex;
+    }
+    pinned = false;
+    pinStyles = null;
+  }
+
+  function refreshGeometry(): void {
+    // If currently pinned (position: fixed), its rect is viewport-relative,
+    // not document-relative -- unpin first so we measure the NATURAL flow
+    // position, then restore pin state against the fresh measurement.
+    const wasPinned = pinned;
+    if (wasPinned) removePin();
+    cachedGeo = measureGeometry();
+    if (wasPinned) applyPin(cachedGeo);
+  }
+
+  function recompute(): void {
+    if (!cachedGeo) cachedGeo = measureGeometry();
+    const progress = computeScrollProgress({ ...cachedGeo, scrollY: win.scrollY, start, end });
+    if (pin) {
+      if (progress > 0 && progress < 1) applyPin(cachedGeo);
+      else removePin();
+    }
+    if (progress !== lastProgress) {
+      lastProgress = progress;
+      onProgress(progress);
+    }
+  }
+
+  function schedule(): void {
+    if (rafId != null) return;
+    rafId = win.requestAnimationFrame(() => {
+      rafId = null;
+      if (pendingResize) { refreshGeometry(); pendingResize = false; }
+      recompute();
+    });
+  }
+
+  function onScrollEvent(): void { schedule(); }
+  function onResizeEvent(): void { pendingResize = true; schedule(); }
+
+  win.addEventListener("scroll", onScrollEvent, { passive: true });
+  win.addEventListener("resize", onResizeEvent);
+  refreshGeometry();
+  recompute(); // establish + report the initial state synchronously
+
+  return {
+    destroy(): void {
+      win.removeEventListener("scroll", onScrollEvent);
+      win.removeEventListener("resize", onResizeEvent);
+      if (rafId != null && typeof win.cancelAnimationFrame === "function") win.cancelAnimationFrame(rafId);
+      removePin();
+    },
+    refresh(): void {
+      if (rafId != null && typeof win.cancelAnimationFrame === "function") { win.cancelAnimationFrame(rafId); rafId = null; }
+      pendingResize = false;
+      refreshGeometry();
+      recompute();
+    },
+  };
+}
+
+/**
+ * Convenience: bind a scroll range directly to a Player's playback position
+ * — drives `player.seekFraction()` (frame index) from scroll progress
+ * instead of real-time playback via `play()`. This is pattern 07's exact
+ * need (a timeline scrubbed by scroll, in both directions) and composes
+ * directly with `pin: true` for pattern 08 (pin the trigger while the SAME
+ * progress drives the Player).
+ *
+ * Pattern 09 (parallax layers) needs no new primitive beyond bindScroll()
+ * itself: call bindScroll() once per layer (or share one binding's
+ * onProgress across N layers, which is cheaper — one listener instead of N)
+ * and apply `translateY(progress * range * speed)` per layer with a
+ * different `speed` multiplier each.
+ */
+export function bindPlayerToScroll(player: Player, options: Omit<ScrollBindingOptions, "onProgress">): ScrollBinding {
+  return bindScroll({
+    ...options,
+    onProgress: (progress) => player.seekFraction(progress),
+  });
 }

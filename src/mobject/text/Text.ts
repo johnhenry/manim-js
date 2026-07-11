@@ -482,6 +482,80 @@ export class Text extends VGroup {
     return parts[0] ?? new VGroup();
   }
 
+  // --- word/line splitting -------------------------------------------------
+  // `_charSource` indexes into `_plainText` (this.text with "\n" stripped --
+  // see _buildGlyphs, which builds it via `lines.join("")` and never assigns
+  // a source index to a newline). Word/line ranges are computed in
+  // `this.text` index space (which DOES contain "\n") and then translated
+  // through `_originalToPlainIndex()` before reusing `_glyphsForRange`, the
+  // same lookup `getPartsByText` uses. Note whitespace characters (including
+  // plain spaces) DO get their own `chars` entry -- just an invisible one,
+  // per the two-single-point-subpath handling below -- so ordinary
+  // char-index arithmetic (no special-casing) is enough; only "\n" is absent
+  // from the glyph stream.
+
+  // Maps each index of `this.text` to the corresponding index in
+  // `_plainText`; positions holding "\n" map to -1 and are never looked up
+  // (word ranges never span a newline, since \S+ stops at it; line ranges
+  // are computed directly in _plainText offset space instead, see lines()).
+  private _originalToPlainIndex(): number[] {
+    const map = new Array<number>(this.text.length);
+    let plain = 0;
+    for (let i = 0; i < this.text.length; i++) {
+      if (this.text[i] === "\n") {
+        map[i] = -1;
+      } else {
+        map[i] = plain++;
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Group `this.chars` into per-word VGroups, splitting on runs of
+   * whitespace (including "\n") in the original source text -- a "word" is
+   * a maximal run of non-whitespace characters. Whitespace itself produces
+   * no word group (runs collapse; multiple spaces between words still
+   * yield exactly one boundary). Returned VGroups are NEW wrapper objects
+   * whose submobjects are the SAME `chars`/glyph mobject instances (shared
+   * identity), so animating a word doesn't disturb `this.chars`' own
+   * structure but stays visually consistent with it.
+   */
+  words(): VGroup[] {
+    if (!this.text.length) return [];
+    const toPlain = this._originalToPlainIndex();
+    const out: VGroup[] = [];
+    for (const match of this.text.matchAll(/\S+/g)) {
+      const origStart = match.index!;
+      const len = match[0].length;
+      const plainStart = toPlain[origStart];
+      const g = new VGroup();
+      for (const m of this._glyphsForRange(plainStart, plainStart + len)) g.add(m);
+      out.push(g);
+    }
+    return out;
+  }
+
+  /**
+   * Group `this.chars` into per-line VGroups, splitting on "\n" in the
+   * original source text. Unlike `words()`, whitespace WITHIN a line
+   * (including its invisible space glyphs) is kept. A single line with no
+   * newlines returns one VGroup containing everything. Same
+   * identity-sharing behavior as `words()`.
+   */
+  lines(): VGroup[] {
+    if (!this.text.length) return [];
+    const out: VGroup[] = [];
+    let offset = 0; // running index into _plainText, mirrors _buildGlyphs' sourceIndex
+    for (const line of this.text.split("\n")) {
+      const g = new VGroup();
+      for (const m of this._glyphsForRange(offset, offset + line.length)) g.add(m);
+      out.push(g);
+      offset += line.length;
+    }
+    return out;
+  }
+
   // --- per-substring styling ----------------------------------------------
   setColorByT2c(t2c?: Record<string, ColorLike>): this {
     if (!t2c) return this;
