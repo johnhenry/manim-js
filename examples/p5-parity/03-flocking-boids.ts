@@ -32,9 +32,24 @@ class FlockingBoids extends Scene {
     // deterministic sim by exactly the frame's dt each updater tick, so the
     // flock visibly organizes (clusters via cohesion/alignment, spreads via
     // separation) over the demo's duration.
-    flock.addUpdater((_m: any, dt: number) => {
-      flock.step(dt);
-    });
+    //
+    // hashExtra: this updater's closure has no tunable parameters of its own
+    // (they're all baked into `flock`'s config above, at construction time,
+    // so they're already covered by the mobject's own identity/geometry) --
+    // included here anyway as the worked example for addUpdater()'s JSDoc,
+    // matching what tuning `perceptionRadius` mid-iteration during this
+    // demo's own port (Campaign 8) would have needed to stay cache-safe.
+    flock.addUpdater(
+      (_m: any, dt: number) => {
+        flock.step(dt);
+      },
+      {
+        hashExtra: () => {
+          const s = flock.simulation;
+          return `${s.perceptionRadius}:${s.separationRadius}:${s.maxSpeed}:${s.maxForce}`;
+        },
+      },
+    );
 
     await this.wait(6);
   }

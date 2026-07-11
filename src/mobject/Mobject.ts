@@ -362,7 +362,36 @@ export class Mobject {
   }
 
   // --- updaters (for continuous animation) --------------------------------
-  addUpdater(fn: Updater): this {
+  /**
+   * `config.hashExtra` is an OPT-IN cache-safety escape hatch: the
+   * partial-movie cache's `wait()` fingerprint (Scene.ts's
+   * `_sceneContentFingerprint()` / `_mobjectFingerprint()`) can see this
+   * mobject's geometry/paint at wait-time, but has no way to see state an
+   * updater CLOSURE captures that only affects the simulation trajectory
+   * DURING the hold (e.g. a flocking sim's `perceptionRadius`, a spring's
+   * `springing`/`damping`) — tuning such a parameter without touching
+   * anything the fingerprint DOES see let a stale cached segment replay
+   * silently (found porting the p5.js campaign's boids/soft-body demos).
+   * Supply `hashExtra: () => string` (mirroring Animation's own
+   * `_hashExtra()` convention) to fold that state into the hash:
+   *
+   * ```ts
+   * flock.addUpdater((_m, dt) => flock.step(dt), {
+   *   hashExtra: () => `${flock.perceptionRadius}:${flock.maxForce}`,
+   * });
+   * ```
+   *
+   * Mechanism: attaches `hashExtra` as a property on `fn` itself (matching
+   * how `_hashExtra` already lives directly on Animation instances) rather
+   * than changing `Updater`'s type or how `this.updaters` is stored/walked
+   * elsewhere. Opt-in — nothing forces a caller to supply it, so this
+   * reduces the footgun rather than eliminating the class of mistake; the
+   * only airtight fix would be always folding in the whole scene, which is
+   * deliberately NOT done here for performance (see the play()-hash fix in
+   * hashAnimations() for the same tradeoff reasoning).
+   */
+  addUpdater(fn: Updater, config?: { hashExtra?: () => string }): this {
+    if (config?.hashExtra) (fn as any).hashExtra = config.hashExtra;
     this.updaters.push(fn);
     return this;
   }

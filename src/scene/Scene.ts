@@ -330,12 +330,18 @@ export class Scene {
   }
 
   // Per-mobject family-deep fingerprint shared by _sceneContentFingerprint()
-  // (all mobjects) and _untouchedMobjectsFingerprint() (a subset) — same
-  // per-leaf signal either way: position + fill + opacity + strokeEnd.
+  // (all mobjects, used by every wait()) and _untouchedMobjectsFingerprint()
+  // (a subset, used by play()) — same per-leaf signal either way: position +
+  // fill + opacity + strokeEnd, PLUS any opt-in updater `hashExtra()`
+  // contributions (see Mobject.addUpdater()'s JSDoc) — a fixed-step
+  // simulation's updater closure can capture tunable state (a boids flock's
+  // perceptionRadius, a spring's damping) that changes what a wait() holds
+  // on without changing anything else this fingerprint already sees.
   private _mobjectFingerprint(m: any): string {
     const fam: any[] = typeof m?.getFamily === "function" ? m.getFamily() : [m];
     let npts = 0;
     const bits: string[] = [];
+    const updaterBits: string[] = [];
     for (const f of fam) {
       npts += Array.isArray(f?.points) ? f.points.length : 0;
       const c = typeof f?.getCenter === "function" && f.points?.length ? f.getCenter() : [0, 0, 0];
@@ -344,8 +350,12 @@ export class Scene {
         `${f?.fillColor?.toHex?.() ?? ""},${Math.round((f?.opacity ?? 1) * 1000)},` +
         `${Math.round((f?.strokeEnd ?? 1) * 1000)}`,
       );
+      for (const u of f?.updaters ?? []) {
+        if (typeof u?.hashExtra === "function") updaterBits.push(u.hashExtra());
+      }
     }
-    return `${m?.constructor?.name ?? "m"}:${npts}:${fnv1a(bits.join(";"))}`;
+    const updaterHash = updaterBits.length ? `:${updaterBits.join(";")}` : "";
+    return `${m?.constructor?.name ?? "m"}:${npts}:${fnv1a(bits.join(";"))}${updaterHash}`;
   }
 
   // Schedule an audio clip. Defaults to the current animation time, so calling

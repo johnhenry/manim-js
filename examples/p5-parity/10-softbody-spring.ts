@@ -64,12 +64,21 @@ class SoftbodySpring extends Scene {
     const R = 3.0;
     const period = 6;
     let time = 0;
-    body.addUpdater((_m: any, dt: number) => {
-      time += dt;
-      const theta = (time / period) * Math.PI * 2;
-      const target: [number, number] = [Math.cos(theta) * R, Math.sin(theta) * R];
-      body.step(dt, target);
-    });
+    // hashExtra: R/period are closure-local variables with NO presence on
+    // `body`/`body.sim` at all -- retuning either (e.g. widening the orbit
+    // radius) changes every subsequent frame of this wait() without
+    // touching anything the fingerprint otherwise sees at wait-start
+    // (the body's initial position/paint are unaffected). This is the
+    // textbook case addUpdater()'s hashExtra option exists for.
+    body.addUpdater(
+      (_m: any, dt: number) => {
+        time += dt;
+        const theta = (time / period) * Math.PI * 2;
+        const target: [number, number] = [Math.cos(theta) * R, Math.sin(theta) * R];
+        body.step(dt, target);
+      },
+      { hashExtra: () => `${body.sim.springing}:${body.sim.damping}:R${R}:period${period}` },
+    );
 
     await this.wait(6); // one full orbit: captures the springy chase/overshoot transient clearly
   }
