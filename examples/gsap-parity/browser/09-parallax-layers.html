@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ecmanim — GSAP parity 09: parallax layers</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: sans-serif; }
+    .note { max-width: 640px; margin: 0 auto; padding: 2rem 1.5rem; text-align: center; }
+    .note h1 { font-weight: 600; margin-bottom: .25rem; }
+    .note code { background: #161b22; padding: .15rem .4rem; border-radius: 4px; }
+    .lead-in, .after { min-height: 60vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+    .lead-in p, .after p { max-width: 480px; text-align: center; color: #8b949e; }
+    /* Must be taller than the viewport: the trigger stays in normal flow
+       (no `pin` used in this pattern), and bindScroll()'s default range ends
+       at "bottom top" -- so the page needs >= one viewport-height of content
+       after the trigger for the document's max scroll to actually reach it
+       (same reachability issue found + fixed in pattern 07's spacer-bottom). */
+    .after { min-height: 120vh; }
+
+    /* The trigger spans the whole parallax scroll range (bindScroll()'s
+       default start/end = one elementHeight, "top top" .. "bottom top"). */
+    #trigger {
+      height: 300vh;
+      position: relative;
+    }
+    /* Sticky viewport-sized "stage" window that the 3 layers scroll within.
+       Plain CSS sticky, unrelated to bindScroll's own `pin` option (not used
+       here -- pattern 09 doesn't pin anything, only offsets layers). */
+    #stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .layer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      will-change: transform;
+    }
+    #label {
+      position: absolute;
+      bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+      font-family: monospace; color: #c9d1d9; background: rgba(13,17,23,.6);
+      padding: .3rem .8rem; border-radius: 4px; z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <h1>09 — Parallax layers</h1>
+    <p>
+      GSAP ScrollSmoother's <code>data-speed</code>: 3 stacked layers move at
+      different rates relative to native scroll — a slow background, a
+      medium midground, and a fast foreground — producing an illusion of
+      depth. All 3 are driven by ONE shared <code>bindScroll()</code> call.
+    </p>
+  </div>
+
+  <div class="lead-in"><p>↓ scroll — watch the 3 layers separate at different speeds ↓</p></div>
+
+  <div id="trigger">
+    <div id="stage">
+      <canvas id="bg" class="layer" width="1280" height="720"></canvas>
+      <canvas id="mid" class="layer" width="1280" height="720"></canvas>
+      <canvas id="fg" class="layer" width="1280" height="720"></canvas>
+      <div id="label">scroll progress: 0%</div>
+    </div>
+  </div>
+
+  <div class="after"><p>End of the parallax range — the 3 layers have reached their maximum offset from each other.</p></div>
+
+  <script type="module">
+    import {
+      play, bindScroll,
+      Scene, VGroup, Circle, RegularPolygon,
+      WHITE, GREEN, ORANGE,
+    } from "../../../dist/browser.js";
+
+    // Three simple, static (single-frame-ish) ecmanim scenes -- one per
+    // parallax layer. `play()` renders live to a <canvas>; a short
+    // add()+wait() draws once without needing a full record/scrub pipeline,
+    // since parallax is about CSS-transform position, not scrub progress.
+
+    class Stars extends Scene {
+      async construct() {
+        const dots = [];
+        for (let i = 0; i < 50; i++) {
+          const x = (((i * 37) % 150) / 10) - 7.5;
+          const y = (((i * 53) % 90) / 10) - 4.2;
+          const r = 0.025 + (i % 3) * 0.02;
+          const dot = new Circle({ radius: r, color: WHITE, fillColor: WHITE, fillOpacity: 0.85 });
+          dot.moveTo([x, y, 0]);
+          dots.push(dot);
+        }
+        this.add(new VGroup(...dots));
+        await this.wait(0.1);
+      }
+    }
+
+    class Mountains extends Scene {
+      async construct() {
+        const tris = [-5, -2, 1.5, 4.5].map((x, i) => {
+          const t = new RegularPolygon(3, { radius: 1.6 + (i % 2) * 0.5, color: GREEN, fillColor: GREEN, fillOpacity: 0.55 });
+          t.moveTo([x, -2.4, 0]);
+          return t;
+        });
+        this.add(new VGroup(...tris));
+        await this.wait(0.1);
+      }
+    }
+
+    class Sun extends Scene {
+      async construct() {
+        const sun = new Circle({ radius: 1.3, color: ORANGE, fillColor: ORANGE, fillOpacity: 0.9 });
+        sun.moveTo([0.5, 1.4, 0]);
+        this.add(sun);
+        await this.wait(0.1);
+      }
+    }
+
+    const bg = document.getElementById("bg");
+    const mid = document.getElementById("mid");
+    const fg = document.getElementById("fg");
+    const label = document.getElementById("label");
+
+    async function boot() {
+      // Bottom-most layer paints an opaque background; the two above it stay
+      // transparent so the layers beneath show through (fillStyle =
+      // "transparent" is a valid canvas color -- CanvasRenderer.clear() just
+      // fillRect()s with it, a visual no-op).
+      await Promise.all([
+        play(Stars, { canvas: bg, quality: "low", background: "#0d1117" }),
+        play(Mountains, { canvas: mid, quality: "low", background: "transparent" }),
+        play(Sun, { canvas: fg, quality: "low", background: "transparent" }),
+      ]);
+
+      const trigger = document.getElementById("trigger");
+      const RANGE = 260; // px of parallax travel across the full 0..1 range
+
+      // ONE shared scroll listener (bindScroll), 3 speed multipliers applied
+      // per layer inside its single onProgress callback -- background lags
+      // behind scroll (0.2x), midground near-native (0.6x), foreground moves
+      // fastest (1.4x), matching data-speed's below-1/above-1 convention.
+      bindScroll({
+        trigger,
+        onProgress: (p) => {
+          bg.style.transform = `translateY(${p * RANGE * 0.2}px)`;
+          mid.style.transform = `translateY(${p * RANGE * 0.6}px)`;
+          fg.style.transform = `translateY(${p * RANGE * 1.4}px)`;
+          label.textContent = `scroll progress: ${Math.round(p * 100)}%`;
+        },
+      });
+    }
+    boot();
+  </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ecmanim — GSAP parity 08: pin + progress</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: sans-serif; }
+    .note { max-width: 640px; margin: 0 auto; padding: 2rem 1.5rem; text-align: center; }
+    .note h1 { font-weight: 600; margin-bottom: .25rem; }
+    .note code { background: #161b22; padding: .15rem .4rem; border-radius: 4px; }
+    .lead-in, .after { min-height: 60vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+    .after p, .lead-in p { max-width: 480px; text-align: center; color: #8b949e; }
+
+    /* The pinned panel. bindPlayerToScroll({ pin: true }) sets this element's
+       position to "fixed" while progress is strictly within (0, 1), and
+       restores it (back to normal flow) at progress 0 or 1 -- see
+       bindScroll()'s applyPin()/removePin() in src/player.ts. */
+    #trigger {
+      height: 100vh;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      background: #0d1117;
+    }
+    /* bindScroll's pin does NOT insert GSAP-style "pinSpacing" (documented in
+       its JSDoc: "no spacer element is inserted... pinning shifts layout
+       below it"). Once the trigger is pinned (position: fixed), it stops
+       contributing its own height to the document's normal flow, which
+       SHRINKS the page's total scroll room right when the pinned range
+       needs scrollY to keep advancing to reach progress 1 -- without extra
+       compensating space below, the browser can hit the document's real
+       max-scroll before the range ever completes, and the panel gets stuck
+       pinned. This spacer supplies that compensating room; it must exceed
+       ~ (2 * trigger height) - (height of the "after" section) to
+       guarantee the full 0..1 range is reachable (verified empirically). */
+    #pin-spacer { height: 200vh; }
+
+    canvas { width: 70vw; max-width: 820px; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: #000; }
+    #bar-track { width: 70vw; max-width: 820px; height: 10px; background: #161b22; border-radius: 5px; overflow: hidden; }
+    #bar-fill { height: 100%; width: 0%; background: #fc6255; transition: width .05s linear; }
+    #label { font-family: monospace; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <h1>08 — Pinned element + scroll progress</h1>
+    <p>
+      GSAP ScrollTrigger's <code>pin: true</code>: the panel below locks in
+      place (<code>position: fixed</code>) while you scroll through its
+      range, during which a paired Scene + progress bar advances. Once the
+      range completes it unpins and normal scrolling resumes.
+    </p>
+  </div>
+
+  <div class="lead-in"><p>↓ scroll — the panel below will pin in place ↓</p></div>
+
+  <div id="trigger">
+    <canvas id="stage" width="1280" height="720"></canvas>
+    <div id="bar-track"><div id="bar-fill"></div></div>
+    <div id="label">recording scene…</div>
+  </div>
+  <div id="pin-spacer"></div>
+
+  <div class="after">
+    <p>Unpinned — normal scrolling has resumed. Scroll back up to re-enter the pinned range.</p>
+  </div>
+
+  <script type="module">
+    import {
+      Player, bindPlayerToScroll,
+      Scene, Circle, Text, Write, Create, FadeOut, Shift,
+      YELLOW, BLUE,
+    } from "../../../dist/browser.js";
+
+    // A short Scene whose playhead is driven 1:1 by scroll progress while
+    // the panel is pinned -- same underlying primitive as pattern 07
+    // (bindPlayerToScroll), composed here with `pin: true`.
+    class PinScene extends Scene {
+      async construct() {
+        const title = new Text("pinned!", { fontSize: 1, color: YELLOW, point: [0, 2.2, 0] });
+        await this.play(new Write(title));
+
+        const dot = new Circle({ radius: 0.5, color: BLUE, fillColor: BLUE, fillOpacity: 0.7 });
+        dot.moveTo([-5, -1, 0]);
+        await this.play(new Create(dot));
+        await this.play(Shift(dot, [10, 0, 0]));
+        await this.play(new FadeOut(dot), new FadeOut(title));
+      }
+    }
+
+    const canvas = document.getElementById("stage");
+    const label = document.getElementById("label");
+    const barFill = document.getElementById("bar-fill");
+
+    const player = new Player({ canvas, quality: "medium", background: "#0d1117" });
+    player.onFrame = (i, _t) => {
+      const pct = player.frameCount > 1 ? Math.round((i / (player.frameCount - 1)) * 100) : 0;
+      label.textContent = `pinned progress: ${pct}%`;
+      barFill.style.width = `${pct}%`;
+    };
+
+    async function boot() {
+      await player.record(PinScene);
+      label.textContent = `ready — ${player.frameCount} frames — scroll to pin`;
+
+      const trigger = document.getElementById("trigger");
+      bindPlayerToScroll(player, { trigger, pin: true });
+    }
+    boot();
+  </script>
+</body>
+</html>

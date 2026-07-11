@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ecmanim — GSAP parity 07: scroll-scrubbed timeline</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: sans-serif; }
+    .note { max-width: 640px; margin: 0 auto; padding: 2rem 1.5rem; text-align: center; }
+    .note h1 { font-weight: 600; margin-bottom: .25rem; }
+    .note code { background: #161b22; padding: .15rem .4rem; border-radius: 4px; }
+    .spacer-top, .spacer-bottom { height: 60vh; display: flex; align-items: center; justify-content: center; }
+    /* Must be taller than the viewport: bindPlayerToScroll()'s default range
+       ends at "bottom top" (elementTop + elementHeight), and the trigger
+       stays in normal document flow the whole time (no `pin`) -- so the page
+       needs at least one viewport-height of content AFTER the trigger, or
+       the document's max scroll caps out before progress ever reaches 1.
+       (Found empirically while verifying this demo: with only 60vh here,
+       scrolling to the true bottom of the page only reached ~90% progress.) */
+    .spacer-bottom { height: 120vh; }
+    .spacer-bottom p { max-width: 480px; text-align: center; color: #8b949e; }
+
+    /* The trigger element IS the scroll range: bindPlayerToScroll() defaults
+       to start="top top" / end="bottom top", i.e. exactly one elementHeight
+       of scroll maps to progress 0..1. Tall on purpose so scrubbing is
+       fine-grained. */
+    #trigger {
+      height: 400vh;
+      position: relative;
+    }
+    /* Sticky (plain CSS, unrelated to bindScroll's own optional `pin`) so the
+       canvas stays put in the viewport for the whole scroll range instead of
+       scrolling out of view immediately. */
+    .sticky-stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+    }
+    canvas { width: 80vw; max-width: 960px; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,.5); background: #000; }
+    #status { font-family: monospace; font-size: .95rem; color: #8b949e; min-height: 1.2em; }
+    #bar-track { width: 80vw; max-width: 960px; height: 8px; background: #161b22; border-radius: 4px; overflow: hidden; }
+    #bar-fill { height: 100%; width: 0%; background: #58c4dd; transition: width .05s linear; }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <h1>07 — Scroll-scrubbed timeline</h1>
+    <p>
+      GSAP ScrollTrigger's <code>scrub</code>: the recorded Scene's playhead
+      is a pure function of scroll position within the tall section below —
+      no independent clock of its own. <strong>Scroll down slowly</strong> to
+      scrub forward frame-by-frame, then <strong>scroll back up</strong> to
+      watch it play in reverse.
+    </p>
+  </div>
+
+  <div class="spacer-top"><p style="max-width:480px;color:#8b949e;">↓ keep scrolling — the scrub range starts here ↓</p></div>
+
+  <div id="trigger">
+    <div class="sticky-stage">
+      <canvas id="stage" width="1280" height="720"></canvas>
+      <div id="bar-track"><div id="bar-fill"></div></div>
+      <div id="status">recording scene…</div>
+    </div>
+  </div>
+
+  <div class="spacer-bottom">
+    <p>End of the scrub range — the timeline is fully played out. Scroll back up to reverse it.</p>
+  </div>
+
+  <script type="module">
+    import {
+      Player, bindPlayerToScroll,
+      Scene, Circle, Square, Text, Create, Write, Transform, FadeOut, Shift, Rotate,
+      BLUE, GREEN, YELLOW,
+    } from "../../../dist/browser.js";
+
+    // A short multi-phase Scene, recorded once. bindPlayerToScroll() then
+    // drives Player.seekFraction() (a frame index) purely from scroll
+    // position -- see src/player.ts's bindScroll()/bindPlayerToScroll() docs.
+    class ScrubScene extends Scene {
+      async construct() {
+        const title = new Text("scroll to scrub", { fontSize: 0.8, color: YELLOW, point: [0, 3, 0] });
+        await this.play(new Write(title));
+
+        const box = new Square({ sideLength: 2, color: BLUE, fillColor: BLUE, fillOpacity: 0.4 });
+        box.moveTo([-4, -0.5, 0]);
+        await this.play(new Create(box));
+
+        // Real classes require `new` (Transform/Rotate are ES classes, not
+        // factory functions -- Shift is the exception, an arrow-function
+        // factory). Calling Transform/Rotate without `new` throws
+        // "Class constructor ... cannot be invoked without 'new'".
+        await this.play(Shift(box, [8, 0, 0]), new Rotate(box, Math.PI * 2));
+
+        const target = new Circle({ radius: 1.3, color: GREEN, fillColor: GREEN, fillOpacity: 0.4 });
+        target.moveTo([4, -0.5, 0]);
+        await this.play(new Transform(box, target));
+
+        await this.play(new FadeOut(box), new FadeOut(title));
+      }
+    }
+
+    const canvas = document.getElementById("stage");
+    const statusEl = document.getElementById("status");
+    const barFill = document.getElementById("bar-fill");
+
+    const player = new Player({ canvas, quality: "medium", background: "#0d1117" });
+
+    player.onFrame = (i, _t) => {
+      const pct = player.frameCount > 1 ? Math.round((i / (player.frameCount - 1)) * 100) : 0;
+      statusEl.textContent = `frame ${i + 1} / ${player.frameCount} — scroll progress ${pct}%`;
+      barFill.style.width = `${pct}%`;
+    };
+
+    async function boot() {
+      await player.record(ScrubScene);
+      statusEl.textContent = `ready — ${player.frameCount} frames recorded — scroll!`;
+
+      const trigger = document.getElementById("trigger");
+      // Default start/end ("top top" .. "bottom top") spans exactly one
+      // elementHeight (400vh here) of scroll -- fine-grained scrubbing.
+      bindPlayerToScroll(player, { trigger });
+    }
+    boot();
+  </script>
+</body>
+</html>

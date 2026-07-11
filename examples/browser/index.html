@@ -37,7 +37,7 @@
         const sq = new Square({ sideLength: 2.4, color: GREEN, fillColor: GREEN, fillOpacity: 0.4 });
         sq.moveTo([3, -0.5, 0]);
         await this.play(new Create(poly), new Create(sq));
-        await this.play(Rotate(poly, Math.PI), Transform(sq, new Circle({ radius: 1.3, color: RED, fillColor: RED, fillOpacity: 0.4 }).moveTo([3, -0.5, 0])));
+        await this.play(new Rotate(poly, Math.PI), new Transform(sq, new Circle({ radius: 1.3, color: RED, fillColor: RED, fillOpacity: 0.4 }).moveTo([3, -0.5, 0])));
         await this.wait(0.4);
         await this.play(new FadeOut(poly), new FadeOut(sq), new FadeOut(title));
       }
