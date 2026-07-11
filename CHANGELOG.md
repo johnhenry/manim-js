@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7.0 — 2026-07-10
+
+### Added
+- **Lottie parity suite** (`examples/lottie-parity/`): "real Lottie files,
+  deterministically played." `loadLottie(json, {width, loop, speed})` →
+  `LottieMobject` — a scrub-safe keyframe engine (cubic-bezier easing +
+  spatial tangents), the shape-item tree, layer parenting, precomps, and
+  CompositeGroup-backed **masks and track mattes** — posed as a pure function
+  of time (`setTime(t)` / `setFrame(f)`, any call order), so it renders
+  headlessly, cache-safe and NaN-free, on the shared Canvas-2D path.
+  `attachTo(scene)` clock updater; `layers()` / `layer(name)`; `warnings`.
+  5 frame-verified demos (the lottie-web MIT corpus: bodymovin trim-paths,
+  gatin shapes, happy2016 precomps, adrock masks, navidad track mattes) +
+  10 authored feature fixtures (eased keyframes, spatial bezier, gradient,
+  repeater, parenting, precomp, solid, text). 28 loader tests.
+- The pre-existing static single-frame importer in `src/interchange/lottie.ts`
+  was renamed `loadLottie → loadLottieShapes`; the animated player now owns
+  the `loadLottie` name.
+
+### Fixed (reaches every CompositeGroup consumer)
+- **Bounded CompositeGroup render memory.** `drawCompositeGroup` allocated a
+  fresh full-frame `@napi-rs/canvas` (Skia) offscreen for every composite
+  group, every frame. That native memory is invisible to V8 (heap/external
+  stay flat), so GC never fired and RSS grew unbounded — a matte/mask-heavy
+  Lottie frame (~150 composite draws) climbed ~½ GB/frame and OOM-killed
+  navidad after ~14 frames. The renderer now borrows full-frame offscreens
+  from a pool bounded by composite NESTING depth and reuses them across
+  frames (each reset to a pristine state on borrow). RSS on navidad is now
+  flat. This reaches masks, mattes, per-mobject blend compositing and
+  ZoomedScene alike.
+- The Lottie demo harness renders through the non-accumulating single-stream
+  encode path (`disableCaching`) rather than buffering every frame's PNG.
+
+
 ## 0.6.0 — 2026-07-10
 
 ### Added
