@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.11.1 — 2026-07-11
+
+A follow-up to the parity-campaigns roadmap: three partial-movie-cache
+correctness fixes found and worked around (but not root-caused) during
+Campaigns 6-9, root-caused and fixed here after a retrospective review.
+
+### Fixed
+- **`play()`'s content hash was blind to unanimated sibling mobjects.**
+  Mutating a mobject NOT targeted by the current `play()`'s animation(s)
+  (position/scale/color/...) had zero effect on that `play()`'s cache key —
+  two scenes differing only in an untouched mobject's state produced
+  byte-identical hashes, so the partial-movie cache could silently replay a
+  stale segment with a visibly wrong rendered frame. Fixed by fingerprinting
+  the top-level mobjects NOT touched by the current `play()` (cheap/no-op in
+  the common case where a `play()` animates most of what's visible).
+- **Partial-cache writes were not atomic.** `encodeFrames()` wrote a cache
+  segment straight to its final path; a concurrent process (parallel
+  `worker_threads` segments, or several demos rendering at once, both real
+  usage patterns) could read that file mid-write — a truncated file, or,
+  given a hash collision, footage spliced in from a completely unrelated
+  render (confirmed reproducible during the Reveal.js/Slidev campaign's
+  parallel port wave). Fixed with a temp-file-then-`renameSync()` write,
+  atomic on the same filesystem.
+- **Updater closures had no way to declare cache-relevant state.**
+  `addUpdater(fn)` took a bare function with no way to say "this closure's
+  captured state affects what a `wait()` renders" — tuning a fixed-step
+  simulation's parameters (e.g. a boids flock's `perceptionRadius`, a
+  spring's `damping`) mid-iteration could silently replay a stale cached
+  segment. Added `addUpdater(fn, {hashExtra: () => string})`, mirroring
+  `Animation`'s existing `_hashExtra()` convention — opt-in, folded into the
+  same fingerprint the `play()` fix above already uses.
+
+
 ## 0.11.0 — 2026-07-11
 
 The presentation finale, and the final campaign in the 9-campaign parity
