@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.0 — 2026-07-11
+
+### Added
+- **ECharts parity suite** (`examples/echarts-parity/`): a business-dashboard
+  chart library, animated. 15/15 gallery examples frame-verified — 9 needed
+  zero new library code (direct reuse of the D3-campaign scale/shape/layout/
+  data-join layer: bar-race, line+area, stacked bars, force graph, sunburst,
+  sankey, themeRiver, waterfall). New chart mobjects: `RadarChart`
+  (independent-max polygon axes), `GaugeChart` (banded dial + needle),
+  `FunnelChart` (value-tapered stages), `Candlestick` (OHLC + moving-average
+  overlay), `Legend` + `ColorBar` (categorical swatches and a gradient-swatch
+  visualMap legend). `PieChart` gained a `roseType: 'radius'|'area'` config
+  (nightingale/rose pies). New core helpers: `scaleThreshold`,
+  `visualMapContinuous` (bundles domain + size/color range + clamp +
+  outOfRange), `movingAverage`; `Axes.plotLineGraph` gained a `smooth`
+  option.
+
+### Fixed (reaches every `Axes` consumer)
+- **Y-axis label misplacement.** `yAxisConfig.includeNumbers: true`
+  positioned tick labels *inside the plot area* instead of beside the axis —
+  `NumberLine._addNumbers()` placed labels at a local offset assuming a
+  horizontal line, but `Axes` rotates the y-axis 90° after construction.
+  `addCoordinates()` already worked around this for its own call path; the
+  constructor now applies the same fix uniformly, so any caller gets correct
+  placement.
+- `visualMapContinuous`'s `size()` was feeding a normalized `[0,1]` t into a
+  scale still keyed to the raw domain.
+
+
 ## 0.7.0 — 2026-07-10
 
 ### Added
