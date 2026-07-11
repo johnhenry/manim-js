@@ -57,6 +57,8 @@ jobs:
             demos: "01-bodymovin 02-gatin 05-navidad"
           - suite: echarts-parity
             demos: "06-gauge 08-candlestick 01-bar-race"
+          - suite: gsap-parity
+            demos: "02-stagger-distributions 04-shape-morph 05-motion-path-autorotate"
     steps:
       - uses: actions/checkout@v4
 
