@@ -142,6 +142,34 @@ test("deckFromMarkdown: a code block's highlight steps are each their own play()
   assert.ok(scene.playRecords.length > before);
 });
 
+// Regression: FadeOut(wrapperGroup) was used to clear a slide's content
+// before the next slide, but the wrapper VGroup was never itself added to
+// scene.mobjects (only its individual children were, via each child's own
+// FadeIn introducer) -- FadeOut.finish() deliberately RESTORES opacity to
+// full right after fading (see Animation.ts's FadeOut, manim parity: a
+// mobject shown again later shouldn't inherit opacity 0), which is only
+// correct because the animated top-level mobject is assumed to have
+// actually left the scene. Since the wrapper's removal was a no-op, every
+// "faded out" child snapped back to full opacity and stacked visibly on top
+// of the next slide's content -- caught by the exemplar port's frame-check,
+// not by the structural tests above.
+test("deckFromMarkdown: a slide's mobjects are actually removed after fading, not left at full opacity", async () => {
+  const md = "# One\nfirst\n\n---\n\n# Two\nsecond";
+  const build = deckFromMarkdown(md, { holdTime: 0.01, fragmentRunTime: 0.01 });
+  const scene = new Scene();
+  await build(scene);
+  const names = scene.mobjects.map((m: any) => m.text);
+  assert.ok(!names.includes("One"), `slide 1's heading must be gone once slide 2 is showing, saw: ${names}`);
+  assert.ok(!names.includes("first"), `slide 1's body must be gone once slide 2 is showing, saw: ${names}`);
+  assert.ok(names.includes("Two"), `slide 2's heading must be present, saw: ${names}`);
+  assert.ok(names.includes("second"), `slide 2's body must be present, saw: ${names}`);
+  // No leftover mobject anywhere in the scene should still be at full
+  // opacity from a slide that's supposed to be gone.
+  for (const m of scene.mobjects as any[]) {
+    assert.ok((m.fillOpacity ?? 1) > 0, `${m.text} should not be a zero-opacity ghost left in the scene`);
+  }
+});
+
 test("deckFromMarkdown: autoAnimate:true uses autoAnimateToNextSection for slides after the first", async () => {
   const md = "# A\nfirst\n\n---\n\n# B\nsecond";
   const build = deckFromMarkdown(md, { holdTime: 0.01, fragmentRunTime: 0.01, autoAnimate: true });

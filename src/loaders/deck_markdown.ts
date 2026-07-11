@@ -26,7 +26,7 @@
 
 import { Scene } from "../scene/Scene.ts";
 import { Text } from "../mobject/text/Text.ts";
-import { VGroup } from "../mobject/VMobject.ts";
+import type { Mobject } from "../mobject/Mobject.ts";
 import { Code, lines } from "../mobject/text/code.ts";
 import { MathTex } from "../mobject/mathtex.ts";
 import { FadeIn, FadeOut } from "../animation/Animation.ts";
@@ -201,15 +201,30 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
       const slide = slides[i];
       const sectionName = slide.heading ?? `slide-${i + 1}`;
 
-      const buildAndReveal = async () => {
-        const layout = new VGroup();
+      // Track each slide's top-level mobjects as a plain array, NOT a
+      // wrapper VGroup: FadeIn/FadeOut are each an "introducer"/"remover"
+      // (see Animation.ts -- getMobjectsToIntroduce()/getMobjectsToRemove()
+      // add/remove `this.mobject` from `scene.mobjects` directly when the
+      // animation begins/finishes). A wrapper group that's never itself
+      // added to `scene.mobjects` breaks this: FadeOut(wrapper)'s finish()
+      // deliberately RESTORES the family's opacity back to full right after
+      // fading (manim parity, so a mobject re-shown later doesn't inherit
+      // opacity 0) -- correct ONLY because the wrapper's removal actually
+      // took it out of the render tree. If the wrapper was never a real
+      // scene member (only its individual children were, via each child's
+      // OWN FadeIn introducer), that removal is a no-op and the restore step
+      // makes every "faded out" child SNAP BACK to full opacity, stacking
+      // visibly on top of the next slide. Fix: animate/remove each child
+      // mobject directly (its own FadeIn/FadeOut lifecycle is then self-
+      // consistent), never wrap-and-animate-the-wrapper.
+      const buildAndReveal = async (): Promise<Mobject[]> => {
+        const built: Mobject[] = [];
         let y = 3;
 
         if (slide.heading) {
           const h = new Text(slide.heading, { fontSize: 0.7, color: headingColor });
           h.moveTo([0, y, 0]);
-          layout.add(h);
-          scene.add(h);
+          built.push(h);
           await scene.play(new FadeIn(h));
           y -= 1.1;
         }
@@ -217,8 +232,7 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
         if (slide.body) {
           const b = new Text(slide.body, { fontSize: 0.4, color: bodyColor });
           b.moveTo([0, y, 0]);
-          layout.add(b);
-          scene.add(b);
+          built.push(b);
           await scene.play(new FadeIn(b), { runTime: fragmentRunTime });
           y -= 0.8;
         }
@@ -227,8 +241,7 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
         for (const bullet of slide.bullets) {
           const t = new Text(`•  ${bullet}`, { fontSize: 0.4, color: bodyColor });
           t.moveTo([-4.5, y, 0]);
-          layout.add(t);
-          scene.add(t);
+          built.push(t);
           await scene.play(new FadeIn(t, { shift: DOWN.map((v) => v * 0.3) }), { runTime: fragmentRunTime });
           y -= 0.6;
         }
@@ -236,16 +249,14 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
         if (slide.math) {
           const m = new MathTex(slide.math, { color: headingColor });
           m.moveTo([0, y - 0.5, 0]);
-          layout.add(m);
-          scene.add(m);
+          built.push(m);
           await scene.play(new FadeIn(m), { runTime: fragmentRunTime });
         }
 
         if (slide.code) {
           const c = new Code(slide.code.source, { language: slide.code.language, fontSize: 0.28 });
           c.moveTo([0, y - 1.5, 0]);
-          layout.add(c);
-          scene.add(c);
+          built.push(c);
           await scene.play(new FadeIn(c), { runTime: fragmentRunTime });
           // One step per highlight-annotation entry -- each play() is a
           // natural fragment/step boundary via scene.playRecords.
@@ -255,7 +266,7 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
           }
         }
 
-        return layout;
+        return built;
       };
 
       if (config.autoAnimate && i > 0) {
@@ -270,10 +281,10 @@ export function deckFromMarkdown(md: string, config: DeckConfig = {}): (scene: S
         });
       } else {
         scene.nextSection(sectionName, undefined, false, slide.notes);
-        const layout = await buildAndReveal();
+        const built = await buildAndReveal();
         await scene.wait(holdTime);
-        if (i < slides.length - 1) {
-          await scene.play(new FadeOut(layout), { runTime: fragmentRunTime });
+        if (i < slides.length - 1 && built.length) {
+          await scene.play(...built.map((m) => new FadeOut(m)), { runTime: fragmentRunTime });
         }
       }
     }
