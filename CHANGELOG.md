@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.11.0 — 2026-07-11
+
+The presentation finale, and the final campaign in the 9-campaign parity
+roadmap (Motion Canvas → D3 → 3Blue1Brown → Mermaid → Lottie → ECharts →
+GSAP → p5.js → Reveal.js/Slidev, v0.3.0 through this release).
+
+### Added
+- **Reveal.js/Slidev parity suite** (`examples/reveal-slidev-parity/`):
+  6/6 rendered & frame-verified. One markdown source drives both a live
+  presentation and a rendered, narrated video — most of the substrate
+  (presenter-mode speaker notes, `playRecords`-derived fragment/step
+  navigation, `Scene.autoAnimateToNextSection()`'s Auto-Animate transition,
+  `Code.selection()`'s highlight steps, `voiceover()`'s `<bookmark>`-synced
+  narration) already existed from earlier campaigns. One new addition:
+  **`deckFromMarkdown()`** / **`parseDeckMarkdown()`** (`src/loaders/
+  deck_markdown.ts`) — a loader for a generic presentation-markdown dialect
+  (headings, `---` separators, incremental bullet fragments, fenced code
+  with Slidev-style line-highlight-step annotations, `$$...$$` math,
+  speaker notes in either framework's convention).
+
+### Fixed
+- `deckFromMarkdown()`: fading a slide's mobjects via a wrapper `VGroup`
+  that was never itself a scene member left every "faded out" mobject
+  snapping back to full opacity and stacking on the next slide (`FadeOut`'s
+  `finish()` deliberately restores opacity, correct only when the removal
+  actually took effect). Fixed by animating each mobject directly.
+- `deckFromMarkdown()`: long bullets rendered with their start clipped off
+  the left edge of frame (`Text.moveTo()` centers, doesn't left-anchor).
+  Fixed with a word-wrap width.
+
+
 ## 0.10.0 — 2026-07-11
 
 ### Added
