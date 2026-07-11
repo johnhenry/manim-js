@@ -1,8 +1,8 @@
 ---
 name: ecmanim-physics
-description: Author physics visualizations in ecmanim — analytic electromagnetic fields (point charges, current loops), traveling/standing waves, paraxial thin-lens optics, and rigid-body simulation (pendulum, gravity/floor drops, pluggable planck.js/@dimforge/rapier2d adapters). Use this skill when a scene needs an ElectricField/MagneticField, a LinearWave/StandingWave, ray/lens refraction math, or falling/swinging bodies driven by a physics engine rather than hand-authored keyframes.
+description: Author physics visualizations in ecmanim — analytic electromagnetic fields (point charges, current loops), traveling/standing waves, paraxial thin-lens optics, rigid-body simulation (pendulum, gravity/floor drops, pluggable planck.js/@dimforge/rapier2d adapters), and deterministic seeded simulation mobjects (Reynolds boids flocking, Hooke's-law mass-spring soft-body). Use this skill when a scene needs an ElectricField/MagneticField, a LinearWave/StandingWave, ray/lens refraction math, falling/swinging bodies driven by a physics engine rather than hand-authored keyframes, or a flocking/soft-body simulation mobject.
 metadata:
-  tags: ecmanim, physics, electromagnetism, waves, optics, rigid-body, pendulum, planck.js, rapier
+  tags: ecmanim, physics, electromagnetism, waves, optics, rigid-body, pendulum, planck.js, rapier, boids, soft-body, simulation
 ---
 
 # ecmanim-physics
@@ -149,6 +149,62 @@ it manually inside your own `Scene.construct()` loop). There is no
 `import { PlanckEngine } from "ecmanim"` — check `docs/physics.md` and
 `src/physics/rigid.ts`'s `PhysicsEngineLike`/`PhysicsEngineOptions` types
 before assuming otherwise.
+
+## Simulation mobjects: boids + soft-body
+
+Two deterministic, seeded simulations from the p5.js-parity campaign — not
+part of `SimpleEngine`/`physics()` above, and driven differently: each is a
+self-advancing `Mobject` whose `.step(dt, ...)` you call yourself (typically
+from `addUpdater`), not something `physics()`'s carrier-updater auto-attaches.
+
+```ts
+import { BoidsFlock, SoftBody } from "ecmanim";
+
+const flock = new BoidsFlock({ count: 30, seed: 1, boidSize: 0.15 }); // Reynolds separation/alignment/cohesion
+scene.add(flock);
+flock.addUpdater((_m, dt) => flock.step(dt));
+
+const blob = new SoftBody({ nodeCount: 5, radius: 1.5, springing: 0.12 }); // Hooke's-law spring-chase, closed Spline outline
+scene.add(blob);
+blob.addUpdater((_m, dt) => blob.step(dt, [Math.sin(scene.time), 0])); // step(dt, target)
+```
+
+- **`BoidsFlock`** (`src/mobject/boids.ts`, wrapping `BoidsSimulation` in
+  `src/layout/boids.ts`) is a `VGroup` of triangles, one per boid, re-posed
+  from the underlying simulation each `step(dt)`. `BoidsConfig`: `count`
+  (default 30), `seed` (default 1), `bounds: {width, height}` (default
+  matches the default world frame, boids wrap toroidally at the edges),
+  `perceptionRadius`/`separationRadius`, `maxSpeed`/`maxForce`, `weights:
+  {separation, alignment, cohesion}`.
+- **`SoftBody`** (`src/mobject/soft_body.ts`, wrapping `SoftBodySimulation`)
+  is a closed `Spline` outline over `nodeCount` nodes (default 5), each
+  independently Hooke's-law-chasing the SAME target point you pass to
+  `step(dt, target)` — reproduces the classic p5 "jelly blob chases the
+  mouse" look with a scripted target instead of live mouse input.
+  `SoftBodyConfig`: `nodeCount`, `radius`, `center`, `springing` (default
+  0.12), `damping` (default 0.98), `seed`, `initialJitter`.
+- **Determinism contract**: both are "deterministic via fixed dt + seed, not
+  closed-form" (same category as `ForceSimulation` in the D3-parity layer) —
+  given the same seed/config and the exact same sequence of `step(dt, ...)`
+  calls, two fresh instances produce byte-identical state at every step.
+  Unlike `ParticleSystem` (a closed-form function of time, sampleable at any
+  `t` in any order), these are genuine mutable simulations: reaching step N
+  means replaying steps 0..N-1 from a fresh instance, so drive them
+  monotonically as scene time advances, same as `SimpleEngine`.
+- **Cache gotcha**: an updater closure that captures mutable state affecting
+  the simulation trajectory (e.g. a moving target you feed into
+  `SoftBody.step(dt, target)`, or a config value you vary from outside the
+  mobject) is invisible to the partial-movie cache's content hash — it only
+  sees the mobject's geometry/paint at `wait()`-time, not what an updater
+  will DO during the hold. Tuning such a value between otherwise-identical
+  renders can replay a stale cached segment silently. Fix with `addUpdater`'s
+  opt-in `hashExtra` config (see `ecmanim-render-cli`'s Caching section):
+  ```ts
+  let target: [number, number] = [0, 0]; // mutated elsewhere in the scene
+  blob.addUpdater((_m, dt) => blob.step(dt, target), {
+    hashExtra: () => `${target[0]}:${target[1]}`,
+  });
+  ```
 
 ## Gotchas
 

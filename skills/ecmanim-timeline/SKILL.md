@@ -1,8 +1,8 @@
 ---
 name: ecmanim-timeline
-description: Sequence and time ecmanim animations with the GSAP-style Timeline position grammar, drive properties with pure expression functions (wiggle/remap/ramp/compose), display live numbers as vector glyphs with VectorDecimalNumber, apply named STYLE_PRESETS/ASPECT_RATIO_PRESETS, render a single frame with renderStill, and enumerate scenes via the registerComposition/compositionsToJSON registry. Use this skill when the user needs multi-beat timing control tighter than sequential play()/wait(), a noise/remap-driven updater, a crisp animated counter, a named visual look or social aspect ratio, or a fast still-frame/poster render.
+description: Sequence and time ecmanim animations with the GSAP-style Timeline position grammar, drive properties with pure expression functions (wiggle/remap/ramp/compose), distribute per-element delays with stagger helpers (cycle/staggerRange/staggerGrid + LaggedStartMap) and split Text into word/line groups for staggered reveal, display live numbers as vector glyphs with VectorDecimalNumber, apply named STYLE_PRESETS/ASPECT_RATIO_PRESETS, render a single frame with renderStill, and enumerate scenes via the registerComposition/compositionsToJSON registry. Use this skill when the user needs multi-beat timing control tighter than sequential play()/wait(), a noise/remap-driven updater, a GSAP-style stagger (grid/from-center/edges/random) or word-by-word/line-by-line text reveal, a crisp animated counter, a named visual look or social aspect ratio, or a fast still-frame/poster render.
 metadata:
-  tags: ecmanim, timeline, expressions, wiggle, remap, presets, renderStill, composition
+  tags: ecmanim, timeline, expressions, wiggle, remap, stagger, text-splitting, presets, renderStill, composition
 ---
 
 # ecmanim-timeline
@@ -12,10 +12,12 @@ shared Plan → Code → Render → Verify → Iterate loop and `checkhealth`
 guidance; this skill only covers the domain specifics below and does not
 repeat that loop. Full API detail lives in
 [../../docs/primitives.md](../../docs/primitives.md) — read it before
-asserting any signature not shown here, since these primitives are Phase-1
-additions layered on top of core manim parity and are easy to misremember.
+asserting any signature not shown here. Most of these primitives are Phase-1
+additions layered on top of core manim parity; the stagger helpers and
+`Text.words()`/`.lines()` (below) were added later, by the GSAP-parity
+campaign — all are easy to misremember regardless of when they landed.
 
-All five primitives here are exported from top-level `"ecmanim"` (isomorphic,
+Every primitive here is exported from top-level `"ecmanim"` (isomorphic,
 dependency-free); `renderStill` is Node-only, from `"ecmanim/node"`.
 
 ## Timeline: GSAP-style position grammar
@@ -46,6 +48,7 @@ Position grammar (`add(animation, position?)`):
 | `"<"` / `"<n"` / `"<-n"` | relative to the *previous add's start* |
 | `">"` / `">n"` / `">-n"` | relative to the *previous add's end* |
 | `"labelName"` | at a label set with `addLabel(name, position?)` |
+| `"labelName+=n"` / `"labelName-=n"` | offset from a label — GSAP's compound form, e.g. `tl.to(x, {...}, "scene1+=3")`. Matches the *longest* known label name that's a prefix of the string, so this is safe even if a label itself contains `+`/`-`. |
 
 Notes grounded in `src/animation/timeline.ts`:
 - `defaults.runTime` (if set) is applied to *every* added animation, overwriting
@@ -90,6 +93,75 @@ const pipeline = compose(f, g, h);                // left-to-right: compose(f,g)
   sites; not required.
 - These compose with `addUpdater` (per-frame) — they are not themselves
   `Animation` subclasses and are not passed to `scene.play()`.
+
+## Stagger helpers + text splitting
+
+`cycle`/`staggerRange`/`staggerGrid` (`src/animation/stagger.ts`, GSAP-parity
+gap-fill) are plain `(mobject, index, total) => value` value-transform
+helpers, matching `LaggedStartMap`'s factory signature — but **not**
+literally pluggable into it, see the gotcha below:
+
+- `cycle(values)` — index-safe cycling through a fixed list (mo.js-style
+  property map), e.g. `cycle(["red", "blue", "green"])`.
+- `staggerRange(from, to)` — even linear distribution across `[from, to]` by
+  index (anime.js's `modifier` ergonomic).
+- `staggerGrid({ grid: [rows, cols], from?, axis?, each? })` — GSAP's
+  `stagger.grid` + `from`: treats a flat mobject list as a `[rows, cols]`
+  grid and returns each item's DELAY (not a runTime) based on TRUE 2D
+  distance from the origin cell, not array-index order. `from`: `"start"`
+  (default) | `"center"` | `"end"` | `"edges"` (ripples out from center,
+  inverted) | `"random"` (deterministic — seeded per-index `mulberry32`, not
+  `Math.random`, so it stays cache-safe under scrubbing) | a cell index |
+  `[row, col]`. `axis: "x" | "y"` restricts distance to one axis (default:
+  Euclidean, both). `each` (default 1) scales the normalized `[0,1]`
+  per-cell delay.
+
+**Gotcha — `staggerGrid` needs a sort step, it isn't a `LaggedStartMap`
+factory.** `LaggedStartMap`/`AnimationGroup` only support one scalar
+`lagRatio` applied cumulatively in ARRAY ORDER (`composition.ts`'s
+`_buildTimings`) — there's no hook for an arbitrary per-item delay.
+`staggerGrid`'s delays are NOT monotonic in flat grid-index order for
+`"center"`/`"edges"`/`"random"`, so handing it to `LaggedStartMap` as-is
+just reproduces a plain sequential stagger, not the spatial ripple. The
+fix (from `examples/gsap-parity/02-stagger-distributions.ts`): compute the
+per-cell delay, **sort the mobjects by it**, then hand the sorted array to
+`LaggedStartMap` with a uniform `lagRatio` — `staggerGrid` supplies the
+*order*, `LaggedStartMap`'s `lagRatio` supplies the even time-spacing:
+
+```ts
+import { staggerGrid, LaggedStartMap, FadeIn } from "ecmanim";
+
+function orderByStaggerGrid<T>(items: T[], grid: [number, number], from: "center" | "edges" | "random") {
+  const delayOf = staggerGrid({ grid, from });
+  return items
+    .map((item, i) => ({ item, delay: delayOf(null, i, items.length) }))
+    .sort((a, b) => a.delay - b.delay)
+    .map((x) => x.item);
+}
+
+const ordered = orderByStaggerGrid(tiles, [5, 5], "center"); // ripple outward from the center
+await scene.play(new LaggedStartMap((m) => new FadeIn(m, { runTime: 0.4 }), ordered, { lagRatio: 0.05 }));
+```
+
+**Text splitting** for word-by-word/line-by-line reveal (`Text.words()`/
+`Text.lines()`, `src/mobject/text/Text.ts`) groups an existing `Text`
+mobject's per-glyph `chars` into word- or line-level `VGroup`s without
+rebuilding anything — the returned groups share the same glyph mobject
+instances as `text.chars`, so animating a word doesn't disturb the parent
+Text's own structure:
+
+```ts
+const words = greeting.words();          // VGroup[], split on whitespace runs (incl. "\n")
+await scene.play(new LaggedStartMap((w) => new FadeIn(w), words, { lagRatio: 0.15 }));
+
+const lines = paragraph.lines();         // VGroup[], split on "\n"; whitespace WITHIN a line is kept
+```
+
+Compose `staggerRange`/`cycle` with `words()`/`lines()` for the classic GSAP
+"text splits and flies in staggered" pattern: pass the split groups straight
+to `LaggedStartMap` and lean on its own uniform `lagRatio` for a left-to-
+right cascade (word/line order is already the natural reading order, so the
+`staggerGrid` sort-by-delay indirection above is normally unnecessary here).
 
 ## VectorDecimalNumber
 
@@ -202,3 +274,16 @@ compositionsToJSON(); // -> [{ name, description, fps, width, height, durationIn
   render visually rather than assuming it always takes effect.
 - Expression drivers (`wiggle`/`remap`/`ramp`) are plain functions for use in
   `addUpdater`, not `Animation` instances — they never go into `scene.play()`.
+- Stagger helpers (`cycle`/`staggerRange`/`staggerGrid`) are also plain
+  `(mobject, index, total) => value` functions, not `Animation`s — they need
+  `LaggedStartMap` (or your own factory loop) to actually drive `play()`.
+- **`staggerGrid`'s delays are an ORDER, not a `LaggedStartMap` factory** —
+  sort mobjects by the computed delay first, then pass the sorted array to
+  `LaggedStartMap` with a uniform `lagRatio`; feeding it in as-is silently
+  degrades to a plain sequential stagger for `"center"`/`"edges"`/`"random"`.
+- `staggerGrid`'s `from: "random"` is deterministic (seeded by index), not
+  `Math.random` — safe under scrubbing/caching, but don't expect a different
+  pattern on every render.
+- `Text.words()`/`.lines()` return NEW wrapper `VGroup`s sharing the same
+  glyph instances as `text.chars` — fine to animate, but don't expect them to
+  be independent copies you can mutate without affecting the parent `Text`.

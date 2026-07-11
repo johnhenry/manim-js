@@ -1,6 +1,6 @@
 ---
 name: ecmanim-render-cli
-description: Covers the `ecmanim` command-line tool — the render/plan/cfg/init/plugins/checkhealth subcommands, render flags (-q quality presets, -f output formats, -o output path, -t transparent, -a write_all, -n from_upto, --save_sections), the manim.config file, the partial-movie-file cache (--disable_caching/--flush_cache), and the three renderer backends (default CPU Canvas-2D, browser-only Three.js/WebGL, headless-GPU renderGL, plus SVG output). Use this skill when invoking `ecmanim` from a shell, choosing a quality/output preset, debugging a caching or section-export issue, or deciding which renderer backend a task needs.
+description: Covers the `ecmanim` command-line tool — the render/plan/cfg/init/plugins/checkhealth subcommands, render flags (-q quality presets, -f output formats, -o output path, -t transparent, -a write_all, -n from_upto, --save_sections), the manim.config file, the partial-movie-file cache (--disable_caching/--flush_cache, atomic partial writes, addUpdater's opt-in hashExtra cache-safety escape hatch), and the three renderer backends (default CPU Canvas-2D, browser-only Three.js/WebGL, headless-GPU renderGL, plus SVG output). Use this skill when invoking `ecmanim` from a shell, choosing a quality/output preset, debugging a caching or section-export issue, a stale-looking render from an updater-driven simulation, or deciding which renderer backend a task needs.
 metadata:
   tags: ecmanim, cli, render, webgl, cache, sections
 ---
@@ -88,6 +88,27 @@ partial and only rebuilds what changed; the render summary reports the reuse
 count. `--disable_caching` renders everything fresh without reading or
 writing partials; `--flush_cache` deletes `partial/` before rendering (use
 when you suspect a stale/corrupt cache rather than a genuine code change).
+Partial writes are atomic (temp-file-then-rename), so a concurrent render
+(parallel `worker_threads` segments, several demos rendering at once) can't
+read a truncated or cross-contaminated partial mid-write.
+
+**`addUpdater`'s `hashExtra` escape hatch.** The content hash sees a
+mobject's geometry/paint at `wait()`-time (including sibling mobjects your
+current `play()` didn't touch, as of a 0.11.1 fix), but has no visibility
+into state an updater CLOSURE captures that only affects the simulation
+DURING the hold — e.g. a flocking sim's `perceptionRadius`, a spring's
+`damping`, or any mutable value fed into a `step(dt, ...)` call (see
+`ecmanim-physics`'s boids/soft-body section for a worked example). Tuning
+such a value between otherwise-identical renders can silently replay a stale
+cached segment. Opt in with:
+```ts
+mob.addUpdater(fn, { hashExtra: () => "some string capturing the closure's cache-relevant state" });
+```
+mirroring `Animation`'s own `_hashExtra()` convention. It's opt-in, not
+automatic — nothing forces you to supply it, so this reduces the footgun
+rather than eliminating the class of mistake; reach for it whenever an
+updater's behavior depends on anything the mobject's own geometry doesn't
+already reflect.
 
 ## Sections
 

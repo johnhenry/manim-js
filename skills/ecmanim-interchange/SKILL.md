@@ -1,6 +1,6 @@
 ---
 name: ecmanim-interchange
-description: Interchange and fidelity workflows for ecmanim — exporting/importing Lottie shape JSON, exporting OpenTimelineIO (OTIO) `.otio` timelines for NLE conforming (Resolve/Premiere/FCPXML/EDL), rendering math with a real LaTeX+dvisvgm toolchain instead of the default MathJax backend, and burning in text/image video watermarks. Use this skill when a task mentions Lottie, After Effects/Bodymovin, OTIO, OpenTimelineIO, editing-timeline export, publication-grade LaTeX, dvisvgm, or watermarking rendered video.
+description: Interchange and fidelity workflows for ecmanim — playing back real animated Lottie/Bodymovin files (`loadLottie` → `LottieMobject`, scrub-safe keyframes/masks/mattes/precomps), exporting/importing static Lottie shape JSON (`loadLottieShapes`), exporting OpenTimelineIO (OTIO) `.otio` timelines for NLE conforming (Resolve/Premiere/FCPXML/EDL), rendering math with a real LaTeX+dvisvgm toolchain instead of the default MathJax backend, and burning in text/image video watermarks. Use this skill when a task mentions Lottie, After Effects/Bodymovin, OTIO, OpenTimelineIO, editing-timeline export, publication-grade LaTeX, dvisvgm, or watermarking rendered video.
 metadata:
   tags: ecmanim, lottie, otio, opentimelineio, latex, dvisvgm, mathjax, watermark, interchange
 ---
@@ -16,10 +16,11 @@ for cost. All four are documented in full at
 grounded summary with accurate import paths and gotchas, not a replacement.
 
 Every claim below was verified against `docs/interchange.md` and the source
-(`src/interchange/lottie.ts`, `src/interchange/otio.ts`,
-`src/mobject/mathtex.ts`, `src/mobject/mathtex_dvisvgm.ts`,
-`src/core/watermark.ts`) — re-check those files if behavior seems to have
-drifted, don't trust this summary from memory in a later session.
+(`src/interchange/lottie.ts`, `src/mobject/lottie_mobject.ts`,
+`src/interchange/otio.ts`, `src/mobject/mathtex.ts`,
+`src/mobject/mathtex_dvisvgm.ts`, `src/core/watermark.ts`) — re-check those
+files if behavior seems to have drifted, don't trust this summary from memory
+in a later session.
 
 ## OpenTimelineIO (`.otio`) export
 
@@ -52,19 +53,62 @@ reimplemented directly in TS rather than wrapping the real library — so
 `fromOtioJSON` only parses the subset of the schema ecmanim itself writes
 (clips + time ranges + metadata), not arbitrary third-party `.otio` files.
 
-## Lottie import/export
+## Lottie import (animated playback): `loadLottie`
 
-Round-trips a `VMobject`'s cubic-Bézier geometry through Lottie's shape model
-(`v`/`i`/`o`/`c`), for handing shapes to a web/iOS/Android Lottie player or
-pulling simple Lottie shape data into an animatable VMobject.
+`loadLottie(json, config?)` (`src/mobject/lottie_mobject.ts`) is a real,
+deterministic Lottie **player** — not a static bridge. It parses a Lottie/
+Bodymovin JSON document (object or string) into a `LottieMobject` (a `Group`)
+whose `setFrame(f)`/`setTime(t)` are pure functions of the animation JSON:
+same frame in, same world geometry out, in any call order — scrub-safe and
+render-cache-safe.
 
 ```ts
-import { vmobjectToLottieJSON, loadLottie } from "ecmanim";
+import { loadLottie } from "ecmanim";
+
+const anim = loadLottie(lottieJson, { width: 6, loop: true, speed: 1 });
+anim.attachTo(scene);           // adds a dt-driven clock updater + scene.add()
+// or drive it by hand instead of attachTo():
+anim.setTime(1.2);              // seconds from the composition's in-point
+anim.setFrame(36);              // exact frame
+anim.layers();                  // -> layer names, JSON order
+anim.layer("Circle 1");         // -> the stable Mobject for that root layer
+anim.warnings;                  // string[] of skipped/approximated features
+```
+
+`LottieConfig`: `width?`/`height?` (target world size; fit ~10 units wide by
+default, tighter fit wins if both are given), `speed?` (default 1, only
+affects `attachTo`'s clock), `loop?` (default `true`, only affects
+`attachTo`). `attachTo(scene)` is the sugar path (adds a clock updater that
+advances by `dt·speed` and re-poses via `setTime`); scrubbing manually with
+`setFrame`/`setTime` always works whether or not `attachTo` was used.
+
+Supported: shape/solid/null/precomp layers (with `ip`/`op`/time-remap),
+groups/transforms, path/rect/ellipse/polystar shapes, fills/strokes/gradient
+fills (linear exact, radial approximated as a flat mid-stop), trim paths
+(→ `strokeStart`/`strokeEnd`), repeaters, `CompositeGroup`-backed masks and
+track mattes, best-effort text layers. Unsupported features (expressions,
+effects, camera/audio layers, image assets, merge paths, luma-exact mattes,
+per-character text animators) **never throw** — they're skipped and recorded
+on `warnings`, deduplicated. See the file header of `lottie_mobject.ts` for
+the full, itemized feature census before assuming a specific Lottie feature
+is or isn't covered.
+
+## Lottie export + the static importer: `loadLottieShapes`
+
+The *original* single-frame Lottie bridge — `vmobjectToLottieJSON` (export)
+and its counterpart, now named **`loadLottieShapes`** (import) — still exists
+in `src/interchange/lottie.ts`, unrelated to `LottieMobject` above. It was
+renamed from `loadLottie` to `loadLottieShapes` when the animated player took
+the `loadLottie` name; if you see `loadLottie` returning a bare `VMobject`/
+`VGroup` in older code or docs, that's this function under its old name.
+
+```ts
+import { vmobjectToLottieJSON, loadLottieShapes } from "ecmanim";
 
 const doc = vmobjectToLottieJSON(shape, { width: 512, height: 512, fps: 30 });
 // doc is a full Lottie animation document (write it out as .json)
 
-const mob = loadLottie(existingLottieJson);  // -> VMobject | VGroup
+const mob = loadLottieShapes(existingLottieJson);  // -> VMobject
 ```
 
 `vmobjectToLottieShapes`, `lottieShapeToPoints`, and `lottieShapesToVMobject`
@@ -78,14 +122,17 @@ before reaching for it:**
 - **No keyframes.** `vmobjectToLottieJSON` captures the mobject's shape *at
   call time*. Anything driven by `play()` is invisible to the export; you get
   one frozen frame packaged as a (technically valid, technically
-  one-frame-long) Lottie document, never a Lottie animation of the ecmanim
-  animation.
+  one-frame-long) Lottie document — for a real multi-keyframe export you'd
+  need to hand-build the keyframe JSON yourself, there is no `play()`-to-
+  Lottie-keyframes exporter.
 - **Geometry only, both directions.** No fills, strokes, gradients, trim
   paths, mattes, or text — importing a rich production Lottie file (the kind
   after-effects/Bodymovin actually produces) will silently drop everything
-  outside `"sh"` shape layers. For faithful *import/playback* of a rich Lottie
-  file, this isn't the tool — use ThorVG-WASM and rasterize instead.
-- **Round-tripping works within that scope**: `loadLottie(vmobjectToLottieJSON(m))`
+  outside `"sh"` shape layers. If you need to faithfully *play* a rich
+  production Lottie file (fills, gradients, masks, mattes, animation), use
+  `loadLottie` above instead — `loadLottieShapes` is single-frame shape-only
+  by design, not a lesser version of the same feature.
+- **Round-tripping works within that scope**: `loadLottieShapes(vmobjectToLottieJSON(m))`
   reproduces the source geometry. Don't expect it to work on Lottie files from
   other tools beyond their shape geometry.
 

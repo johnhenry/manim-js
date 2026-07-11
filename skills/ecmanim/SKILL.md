@@ -21,12 +21,12 @@ or the target project's `.claude/skills/`.
 
 | Need | Skill |
 |---|---|
-| Sequencing/timing grammar, expression-driven properties (wiggle/remap), a vector-glyph number counter, style/aspect-ratio presets, rendering a single still frame | `ecmanim-timeline` |
+| Sequencing/timing grammar, expression-driven properties (wiggle/remap), GSAP-style stagger distributions + text word/line splitting, a vector-glyph number counter, style/aspect-ratio presets, rendering a single still frame | `ecmanim-timeline` |
 | Burned-in or overlay captions (SRT, karaoke, TikTok-style), audio-reactive visuals (FFT/waveform) | `ecmanim-captions-audio` |
 | Narration: `voiceover()`, bookmarks, TTS providers | `ecmanim-voiceover` |
-| Auto shared-element transforms between states, slide/section presenter controls, diagram-as-code (Mermaid/D2-lite → animated graph) | `ecmanim-presentation` |
-| Importing/exporting Lottie, exporting OTIO timelines, real-TeX (LaTeX) math, watermarking | `ecmanim-interchange` |
-| Physics: analytic E&M/wave/optics fields, rigid-body simulation | `ecmanim-physics` |
+| Auto shared-element transforms between states (incl. GSAP-style FLIP), slide/section presenter controls, markdown-authored decks, diagram-as-code (a small custom DSL, plus a real headless-Mermaid loader) | `ecmanim-presentation` |
+| Playing back a real animated Lottie file, or a static Lottie shape import/export bridge, exporting OTIO timelines, real-TeX (LaTeX) math, watermarking | `ecmanim-interchange` |
+| Physics: analytic E&M/wave/optics fields, rigid-body simulation, deterministic boids-flocking/soft-body simulation mobjects | `ecmanim-physics` |
 | Turning a topic/brief into a finished video without hand-writing a Scene (Format lifecycle, plan-IR/dry-run, quality gates) | `ecmanim-authoring-pipeline` |
 | Live-reloading local preview server, schema-driven prop controls | `ecmanim-studio` |
 | CLI flags, quality/output presets, caching, renderer backends (canvas/WebGL/z-buffer 3D) | `ecmanim-render-cli` |
@@ -54,8 +54,8 @@ await render(Demo, { output: "demo.mp4", quality: "high" });
 A Scene is a class with `async construct()`; build mobjects (`Circle`, `Square`,
 `Text`, ...), animate them with `this.play(new SomeAnimation(...))` or the
 `.animate` proxy, and `this.wait(seconds)` between beats. `render()` (Node) or
-`play()`/`record()` (browser, from `ecmanim/browser`) drives the Scene. ~120
-mobjects, ~67 animations, all manim rate functions, and the full manim color
+`play()`/`record()` (browser, from `ecmanim/browser`) drives the Scene. ~150
+mobjects, ~80 animations, all manim rate functions, and the full manim color
 palette are available — same names as Python manim where they overlap. See
 [docs/primitives.md](../../docs/primitives.md) and the top-level
 [README.md](../../README.md) for the full quickstart and parity table (adjust

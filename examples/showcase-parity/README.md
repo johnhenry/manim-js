@@ -24,7 +24,7 @@ Iterating on a demo? Delete `out/partial/` (and `out/_gen/` for two-stage
 demos) — static pre-play mutations aren't captured by the segment content
 hash, so stale partials can be reused after an edit.
 
-## The 18 demos
+## Scorecard — 18/18 (16 Strong + 2 Strong, compositing scope)
 
 | # | Showcase entry | Before → After | Demo | Features proven |
 |---|---|---|---|---|

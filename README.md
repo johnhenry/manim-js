@@ -146,6 +146,19 @@ npx ecmanim checkhealth                   # node / ffmpeg / canvas / fonts
 Full flag and subcommand reference, config-file format, caching, and sections:
 [docs/cli.md](docs/cli.md).
 
+## Claude Code skills
+
+[`skills/`](skills/) is a portable skill package for authoring ecmanim scenes
+with Claude Code — a router skill ([`skills/ecmanim/`](skills/ecmanim/)) plus
+10 domain skills (timeline/sequencing, captions & audio, voiceover,
+presentation/diagrams, interchange, physics, the prompt-to-video authoring
+pipeline, Studio live-preview, CLI/render mechanics, practical-authoring
+troubleshooting). Not auto-loaded — copy or symlink `skills/` into
+`~/.claude/skills/` or a target project's `.claude/skills/` to use it. It
+teaches the Plan → Code → Render → Verify → Iterate authoring loop; it doesn't
+cover the parity-campaign galleries below, which are recreations of other
+tools' example suites rather than authoring guidance.
+
 ## Plugins
 
 Extend the engine three ways — see [docs/plugins.md](docs/plugins.md):
@@ -191,6 +204,41 @@ Render any of these with `node examples/<name>.ts` (writes to `examples/out/`):
 | `examples/browser-three/index.html` | browser WebGL/Three.js backend (+ "Explore" orbit mode) |
 | `examples/plugins/heart-plugin.ts` | native `use()` plugin |
 | `examples/plugins/cyberpunk.manifest.json` | portable cross-language manifest |
+
+## Parity campaigns
+
+Beyond the feature demos above, ecmanim ships **169 individually-runnable
+recreations** of other tools' own example galleries — the receipts for
+specific parity claims, one campaign per target ecosystem. Each lives in its
+own `examples/<target>-parity/` directory with a scorecard README, a raw
+reference corpus (`ref/`, with license/provenance), and an `npm run
+demos:<target>` script that renders every demo in the suite fresh.
+
+| # | Target | Version | Demos | Directory |
+|---|--------|---------|-------|-----------|
+| — | [Remotion.dev showcase](examples/showcase-parity/) | v0.1.0 | 18/18 | `showcase-parity` |
+| — | [Manim gallery](examples/manim-parity/) | v0.2.0 | 27/27 | `manim-parity` |
+| 1 | [Motion Canvas](examples/motion-canvas-parity/) | v0.3.0 | 25/25 | `motion-canvas-parity` |
+| 2 | [D3.js top 25](examples/d3-parity/) | v0.4.0 | 25/25 | `d3-parity` |
+| 3 | [3Blue1Brown canon](examples/threeb1b-parity/) | v0.5.0 | 10/10 | `threeb1b-parity` |
+| 4 | [Mermaid diagrams](examples/mermaid-parity/) | v0.6.0 | 13/13 | `mermaid-parity` |
+| 5 | [Lottie](examples/lottie-parity/) | v0.7.0 | 5/5 | `lottie-parity` |
+| 6 | [ECharts gallery](examples/echarts-parity/) | v0.8.0 | 15/15 | `echarts-parity` |
+| 7 | [GSAP patterns](examples/gsap-parity/) | v0.9.0 | 13/13 (10 video + 3 live-browser) | `gsap-parity` |
+| 8 | [p5.js generative](examples/p5-parity/) | v0.10.0 | 12/12 | `p5-parity` |
+| 9 | [Reveal.js / Slidev](examples/reveal-slidev-parity/) | v0.11.0 | 6/6 | `reveal-slidev-parity` |
+
+The two unnumbered rows are the foundation-era programs that predate the
+formal "campaign" playbook (see `CHANGELOG.md` for their own scoring
+narrative); campaigns 1–9 follow a uniform scorecard format. Each campaign's
+README states its honest divergences from the original — what's a faithful
+recreation vs. an approximation, and why.
+
+```bash
+npm run demos:d3        # renders all 25 D3 demos -> examples/d3-parity/out/*.mp4
+npm run demos:echarts   # renders all 15 ECharts demos -> examples/echarts-parity/out/*.mp4
+# ...and so on; see package.json's demos:* scripts for the full list.
+```
 
 ## Architecture
 

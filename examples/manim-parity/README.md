@@ -32,7 +32,7 @@ segment content hash.
 | `ImageMobject(np.uint8([[...]]))` | `new ImageMobject(await imageFromArray([[...]]))` |
 | LaTeX binary | MathJax (`initMathTex()`; demoRender calls it) |
 
-## The 27 ports
+## Scorecard — 27/27 ported
 
 | # | Example | Assessment → Now | Gaps closed for it |
 |---|---|---|---|
