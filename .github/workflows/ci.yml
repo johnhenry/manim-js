@@ -53,6 +53,8 @@ jobs:
             demos: "01-fourier-epicycles 02-linear-transformation 08-taylor-series"
           - suite: mermaid-parity
             demos: "01-flowchart 02-sequence 13-diagram-diff"
+          - suite: lottie-parity
+            demos: "01-bodymovin 02-gatin 05-navidad"
     steps:
       - uses: actions/checkout@v4
 
