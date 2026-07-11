@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0 — 2026-07-11
+
+### Added
+- **GSAP parity suite** (`examples/gsap-parity/`): a pattern canon (not a
+  gallery port) recreating 13 illustrative GSAP docs patterns, proving both
+  the rendered-video side (10 patterns) and the browser-player side (3
+  scroll-driven patterns, rendered as live HTML pages since a video has no
+  scroll input). New: `staggerGrid()` (grid-aware 2D stagger distributions —
+  `from:"center"/"edges"/"random"`, deterministic seeded randomness),
+  `MoveAlongPath.autoRotate` (orients along the path tangent),
+  `Text.words()`/`.lines()` (group the existing per-glyph `chars` into
+  word/line-level VGroups), a FLIP transition helper
+  (`flipGetState()`/`flipFrom()`, `src/animation/flip.ts`), and `Player`
+  scroll-binding (`bindScroll()`/`bindPlayerToScroll()`, a ScrollTrigger
+  scrub/pin subset — `computeScrollProgress()` is the pure, testable math
+  core).
+
+### Fixed
+- `Timeline`'s position-parameter resolver didn't handle GSAP's compound
+  `"label+=n"`/`"label-=n"` form (`tl.to(x, {...}, "scene1+=3")` — literally
+  GSAP's own docs example) — only bare `"+=n"` (relative to cursor) and bare
+  label lookup worked.
+- `examples/browser/index.html` called `Rotate(...)`/`Transform(...)` (real
+  ES classes) without `new` — would throw at runtime if exercised.
+
+
 ## 0.8.0 — 2026-07-11
 
 ### Added
