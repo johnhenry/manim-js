@@ -265,6 +265,8 @@ export type { MermaidLoadConfig, MermaidRenderConfig, MermaidDiagramType } from 
 export { revealDiagram, DiagramReveal, parseEdgeEndpoints } from "./animation/diagram_reveal.ts";
 export type { DiagramRevealConfig } from "./animation/diagram_reveal.ts";
 export { diffDiagrams, DiagramDiff } from "./animation/diagram_diff.ts";
+export { parseDeckMarkdown, deckFromMarkdown } from "./loaders/deck_markdown.ts";
+export type { DeckSlide, DeckCodeBlock, DeckConfig } from "./loaders/deck_markdown.ts";
 export type { DiagramDiffConfig } from "./animation/diagram_diff.ts";
 
 // --- Lottie campaign (v0.7.0) ---------------------------------------------------
