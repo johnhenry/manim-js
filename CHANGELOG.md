@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.10.0 — 2026-07-11
+
+### Added
+- **p5.js parity suite** (`examples/p5-parity/`): 12 generative-art gallery
+  patterns (flocking, cellular automata, fractals, springs, noise fields)
+  recreated as reproducible videos — every simulation is a pure function of
+  a seed + fixed timestep, unlike the originals' live-mouse/`Math.random()`
+  interactivity. New: `BoidsSimulation`/`BoidsFlock` (`src/layout/boids.ts`,
+  `src/mobject/boids.ts` — Reynolds separation/alignment/cohesion),
+  `CellularAutomaton` (`src/mobject/cellular_automaton.ts` — Conway's
+  B3/S23 or a custom neighbor rule, raster-tier rendering via disjoint
+  rectangle subpaths in one VMobject), `SoftBodySimulation`/`SoftBody`
+  (`src/mobject/soft_body.ts` — Hooke's-law spring chase of a scripted
+  target). Every gap-fill mobject's determinism is pinned by a dedicated
+  test (same seed + input sequence → byte-identical output at every step).
+
+### Fixed
+- `CellularAutomaton`'s neighbor count was wrong for `rows:1` (its own
+  documented "1D elementary CA via a custom rule" use case) — the toroidal
+  wrap collapsed all three `dr` offsets onto the same row, triple-counting
+  the left/right neighbors instead of the true `{left, right}` pair. Shipped
+  unnoticed because Wolfram Rule 90 happens to be symmetric enough to still
+  look right by coincidence.
+
+
 ## 0.9.0 — 2026-07-11
 
 ### Added
