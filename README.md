@@ -240,6 +240,15 @@ npm run demos:echarts   # renders all 15 ECharts demos -> examples/echarts-parit
 # ...and so on; see package.json's demos:* scripts for the full list.
 ```
 
+**Browse all 196 demos** (top-level + every campaign) as a static site with
+inline thumbnails/video, generated from these same READMEs — see
+[`examples/gallery/`](examples/gallery/):
+
+```bash
+npm run gallery:build    # regenerate the site from whatever's already rendered
+npx serve .               # from the repo root, then open /examples/gallery/index.html
+```
+
 ## Architecture
 
 ```

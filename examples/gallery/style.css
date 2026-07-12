@@ -1,0 +1,78 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0 1.5rem 3rem;
+  background: #0d1117;
+  color: #e6edf3;
+  font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+a { color: #58a6ff; }
+header {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 0 1rem;
+}
+header h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
+header p { margin: 0.15rem 0; color: #8b949e; }
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #161b22;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.cat-grid, .demo-grid {
+  max-width: 1200px;
+  margin: 1rem auto 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+.cat-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.cat-card:hover { border-color: #58a6ff; }
+.cat-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.cat-card h3 { margin: 0.6rem 0.75rem 0; font-size: 1rem; text-transform: capitalize; }
+.cat-card .scorecard { margin: 0.25rem 0.75rem; color: #8b949e; font-size: 0.85rem; }
+.cat-card .count { margin: 0 0.75rem 0.75rem; color: #56d364; font-size: 0.8rem; }
+
+.card {
+  margin: 0;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.card video, .card .unrendered {
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: block;
+  background: #010409;
+}
+.card .unrendered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: #6e7681;
+  text-align: center;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
+.card figcaption { padding: 0.6rem 0.75rem 0.8rem; }
+.card .name { font-weight: 600; }
+.card .desc { margin: 0.3rem 0; color: #c9d1d9; font-size: 0.88rem; }
+.card .path { display: inline-block; margin-top: 0.2rem; color: #8b949e; }
+
+.unrendered { display: flex; align-items: center; justify-content: center; color: #6e7681; aspect-ratio: 16/9; }
